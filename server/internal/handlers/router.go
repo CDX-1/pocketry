@@ -3,7 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
+	"time"
 
 	"github.com/CDX-1/pocketry/internal/auth"
 	"github.com/CDX-1/pocketry/internal/db"
@@ -27,6 +27,25 @@ func RegisterRoutes() *http.ServeMux {
 	mux.HandleFunc("GET /api/vault", handleGetVault)
 
 	return mux
+}
+
+// checks if a session token is valid
+func requireAuth(r *http.Request) (int64, error) {
+	authHeader := r.Header.Get("Authorization")
+
+	rawToken, err := auth.ExtractBearerToken(authHeader)
+	if err != nil {
+		return 0, err
+	}
+
+	tokenHash := auth.HashSessionToken(rawToken)
+
+	userID, err := db.Q.GetSessionByTokenHash(r.Context(), tokenHash)
+	if err != nil {
+		return 0, err
+	}
+
+	return userID, nil
 }
 
 func handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -74,23 +93,35 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rawToken, err := auth.GenerateSessionToken()
+	if err != nil {
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		return
+	}
+
+	tokenHash := auth.HashSessionToken(rawToken)
+
+	err = db.Q.CreateSession(r.Context(), db.CreateSessionParams{
+		UserID:    user.ID,
+		TokenHash: tokenHash,
+		ExpiresAt: time.Now().Add(24 * time.Hour),
+	})
+	if err != nil {
+		http.Error(w, "Server error", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message": "Login successful",
-		"token":   strconv.FormatInt(user.ID, 10),
+		"token":   rawToken,
 	})
 }
 
 func handleSaveVault(w http.ResponseWriter, r *http.Request) {
-	token := r.Header.Get("Authorization")
-	if token == "" {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	userID, err := strconv.ParseInt(token, 10, 64)
+	userID, err := requireAuth(r)
 	if err != nil {
-		http.Error(w, "Invalid token format", http.StatusUnauthorized)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -101,7 +132,7 @@ func handleSaveVault(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = db.Q.SaveVault(r.Context(), db.SaveVaultParams{
-		UserID: userID,
+		UserID:        userID,
 		EncryptedBlob: req.EncryptedBlob,
 	})
 	if err != nil {
@@ -113,15 +144,9 @@ func handleSaveVault(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetVault(w http.ResponseWriter, r *http.Request) {
-	token := r.Header.Get("Authorization")
-	if token == "" {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	userID, err := strconv.ParseInt(token, 10, 64)
+	userID, err := requireAuth(r)
 	if err != nil {
-		http.Error(w, "Invalid token format", http.StatusUnauthorized)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
