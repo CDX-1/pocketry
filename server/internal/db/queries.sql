@@ -37,7 +37,7 @@ INSERT INTO sessions (
     expires_at
 ) VALUES (?, ?, ?);
 
--- name: GetSessionByTokenHash :exec
+-- name: GetSessionByTokenHash :one
 -- Retrives a session by its corresponding token hash.
 SELECT user_id
 FROM sessions

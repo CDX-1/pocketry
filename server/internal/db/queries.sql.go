@@ -59,7 +59,7 @@ func (q *Queries) DeleteSession(ctx context.Context, tokenHash string) error {
 	return err
 }
 
-const getSessionByTokenHash = `-- name: GetSessionByTokenHash :exec
+const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
 SELECT user_id
 FROM sessions
 WHERE token_hash = ?
@@ -68,9 +68,11 @@ LIMIT 1
 `
 
 // Retrives a session by its corresponding token hash.
-func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) error {
-	_, err := q.db.ExecContext(ctx, getSessionByTokenHash, tokenHash)
-	return err
+func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getSessionByTokenHash, tokenHash)
+	var user_id int64
+	err := row.Scan(&user_id)
+	return user_id, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
