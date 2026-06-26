@@ -6,7 +6,16 @@ package db
 
 import (
 	"database/sql"
+	"time"
 )
+
+type Session struct {
+	ID        int64
+	UserID    int64
+	TokenHash string
+	ExpiresAt time.Time
+	CreatedAt sql.NullTime
+}
 
 type User struct {
 	ID           int64

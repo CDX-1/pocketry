@@ -28,3 +28,24 @@ SELECT encrypted_blob
 FROM vaults 
 WHERE user_id = ? 
 LIMIT 1;
+
+-- name: CreateSession :exec
+-- Creates a new session for a user allowing vault access.
+INSERT INTO sessions (
+    user_id,
+    token_hash,
+    expires_at
+) VALUES (?, ?, ?);
+
+-- name: GetSessionByTokenHash :exec
+-- Retrives a session by its corresponding token hash.
+SELECT user_id
+FROM sessions
+WHERE token_hash = ?
+AND expires_at > CURRENT_TIMESTAMP
+LIMIT 1;
+
+-- name: DeleteSession :exec
+-- Deletes a session by its corresponding token hash.
+DELETE FROM sessions
+WHERE token_hash = ?;

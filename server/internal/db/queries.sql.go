@@ -7,7 +7,28 @@ package db
 
 import (
 	"context"
+	"time"
 )
+
+const createSession = `-- name: CreateSession :exec
+INSERT INTO sessions (
+    user_id,
+    token_hash,
+    expires_at
+) VALUES (?, ?, ?)
+`
+
+type CreateSessionParams struct {
+	UserID    int64
+	TokenHash string
+	ExpiresAt time.Time
+}
+
+// Creates a new session for a user allowing vault access.
+func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) error {
+	_, err := q.db.ExecContext(ctx, createSession, arg.UserID, arg.TokenHash, arg.ExpiresAt)
+	return err
+}
 
 const createUser = `-- name: CreateUser :exec
 INSERT INTO users (
@@ -24,6 +45,31 @@ type CreateUserParams struct {
 // :exec tells sqlc this query modifies the database but doesn't return any rows.
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 	_, err := q.db.ExecContext(ctx, createUser, arg.Username, arg.PasswordHash)
+	return err
+}
+
+const deleteSession = `-- name: DeleteSession :exec
+DELETE FROM sessions
+WHERE token_hash = ?
+`
+
+// Deletes a session by its corresponding token hash.
+func (q *Queries) DeleteSession(ctx context.Context, tokenHash string) error {
+	_, err := q.db.ExecContext(ctx, deleteSession, tokenHash)
+	return err
+}
+
+const getSessionByTokenHash = `-- name: GetSessionByTokenHash :exec
+SELECT user_id
+FROM sessions
+WHERE token_hash = ?
+AND expires_at > CURRENT_TIMESTAMP
+LIMIT 1
+`
+
+// Retrives a session by its corresponding token hash.
+func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) error {
+	_, err := q.db.ExecContext(ctx, getSessionByTokenHash, tokenHash)
 	return err
 }
 
