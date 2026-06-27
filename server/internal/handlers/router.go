@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -50,14 +49,20 @@ func requireAuth(r *http.Request) (int64, error) {
 
 func handleRegister(w http.ResponseWriter, r *http.Request) {
 	var req AuthRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+
+	if err := decodeJSON(w, r, &req, maxAuthBodyBytes); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := validateAuthRequest(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	hashed, err := auth.HashPassword(req.Password)
 	if err != nil {
-		http.Error(w, "Server error", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "failed to hash password")
 		return
 	}
 
@@ -66,36 +71,43 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		PasswordHash: hashed,
 	})
 	if err != nil {
-		http.Error(w, "Username taken", http.StatusConflict)
+		writeError(w, http.StatusConflict, "username already exists")
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"status": "Registration successful"})
+	writeJSON(w, http.StatusCreated, map[string]string{
+		"status": "registration successful",
+	})
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req AuthRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+
+	if err := decodeJSON(w, r, &req, maxAuthBodyBytes); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := validateAuthRequest(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	user, err := db.Q.GetUserByUsername(r.Context(), req.Username)
 	if err != nil {
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
 	match, err := auth.VerifyPassword(req.Password, user.PasswordHash)
 	if err != nil || !match {
-		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
 	rawToken, err := auth.GenerateSessionToken()
 	if err != nil {
-		http.Error(w, "Server error", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "failed to create session")
 		return
 	}
 
@@ -107,13 +119,12 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		ExpiresAt: time.Now().Add(24 * time.Hour),
 	})
 	if err != nil {
-		http.Error(w, "Server error", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "failed to save session")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Login successful",
+	writeJSON(w, http.StatusOK, map[string]any{
+		"message": "login successful",
 		"token":   rawToken,
 	})
 }
@@ -121,13 +132,19 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 func handleSaveVault(w http.ResponseWriter, r *http.Request) {
 	userID, err := requireAuth(r)
 	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	var req VaultRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Bad request", http.StatusBadRequest)
+
+	if err := decodeJSON(w, r, &req, maxVaultBodyBytes); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := validateVaultRequest(&req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -136,26 +153,29 @@ func handleSaveVault(w http.ResponseWriter, r *http.Request) {
 		EncryptedBlob: req.EncryptedBlob,
 	})
 	if err != nil {
-		http.Error(w, "Database error", http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "failed to save vault")
 		return
 	}
 
-	json.NewEncoder(w).Encode(map[string]string{"status": "Vault synced"})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "vault synced",
+	})
 }
 
 func handleGetVault(w http.ResponseWriter, r *http.Request) {
 	userID, err := requireAuth(r)
 	if err != nil {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	blob, err := db.Q.GetVaultByUserID(r.Context(), userID)
 	if err != nil {
-		http.Error(w, "Vault record empty", http.StatusNotFound)
+		writeError(w, http.StatusNotFound, "vault not found")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"encrypted_blob": blob})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"encrypted_blob": blob,
+	})
 }
