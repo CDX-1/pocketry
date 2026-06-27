@@ -1,0 +1,29 @@
+name: Go Server Tests
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  test:
+    name: Run Go Tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: server/go.mod
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run Tests
+        run: go test ./... -v
