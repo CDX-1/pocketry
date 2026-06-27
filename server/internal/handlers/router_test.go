@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -99,7 +100,7 @@ func TestRegisterLoginSaveAndGetVault(t *testing.T) {
 	}
 
 	saveReq := makeJSONRequest(t, http.MethodPost, "/api/vault", VaultRequest{
-		EncryptedBlob:    "placeholder-vault-blob",
+		EncryptedBlob:    validTestEnvelope(),
 		ExpectedRevision: 0,
 	}, token)
 
@@ -119,14 +120,14 @@ func TestRegisterLoginSaveAndGetVault(t *testing.T) {
 		t.Fatalf("expected get vault status %d, got %d body=%s", http.StatusOK, getRR.Code, getRR.Body.String())
 	}
 
-	getBody := decodeResponse[map[string]any](t, getRR)
+	getBody := decodeResponse[VaultResponse](t, getRR)
 
-	if getBody["encrypted_blob"] != "placeholder-vault-blob" {
-		t.Fatalf("unexpected vault blob: %q", getBody["encrypted_blob"])
+	if !reflect.DeepEqual(getBody.EncryptedBlob, validTestEnvelope()) {
+		t.Fatalf("unexpected encrypted blob:\nGot:  %+v\nWant: %+v", getBody.EncryptedBlob, validTestEnvelope())
 	}
 
-	if getBody["revision"].(float64) != 1 {
-		t.Fatalf("expected revision 1, got %v", getBody["revision"])
+	if getBody.Revision != 1 {
+		t.Fatalf("expected revision 1, got %d", getBody.Revision)
 	}
 }
 
@@ -281,7 +282,7 @@ func TestVaultRevisionConflict(t *testing.T) {
 	token := loginBody["token"]
 
 	createReq := makeJSONRequest(t, http.MethodPost, "/api/vault", VaultRequest{
-		EncryptedBlob:    "revision-1-data",
+		EncryptedBlob:    validTestEnvelope(),
 		ExpectedRevision: 0,
 	}, token)
 
@@ -293,7 +294,7 @@ func TestVaultRevisionConflict(t *testing.T) {
 	}
 
 	updateReq := makeJSONRequest(t, http.MethodPost, "/api/vault", VaultRequest{
-		EncryptedBlob:    "revision-2-data",
+		EncryptedBlob:    validTestEnvelope(),
 		ExpectedRevision: 1,
 	}, token)
 
@@ -305,7 +306,7 @@ func TestVaultRevisionConflict(t *testing.T) {
 	}
 
 	conflictReq := makeJSONRequest(t, http.MethodPost, "/api/vault", VaultRequest{
-		EncryptedBlob:    "stale-device-data",
+		EncryptedBlob:    validTestEnvelope(),
 		ExpectedRevision: 1,
 	}, token)
 
