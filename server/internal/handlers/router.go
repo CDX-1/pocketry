@@ -21,9 +21,9 @@ type VaultRequest struct {
 }
 
 type VaultResponse struct {
-	EncryptedBlob string `json:"encrypted_blob"`
-	Revision      int64  `json:"revision"`
-	UpdatedAt     string `json:"updated_at"`
+	EncryptedBlob vault.Envelope `json:"encrypted_blob"`
+	Revision      int64  		 `json:"revision"`
+	UpdatedAt     string 		 `json:"updated_at"`
 }
 
 func RegisterRoutes() *http.ServeMux {
@@ -223,9 +223,14 @@ func handleGetVault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var updatedAtStr string
+    if vaultRecord.UpdatedAt.Valid {
+        updatedAtStr = vaultRecord.UpdatedAt.Time.Format(time.RFC3339)
+    }
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"encrypted_blob": env,
 		"revision":       vaultRecord.Revision,
-		"updated_at":     vaultRecord.UpdatedAt,
+		"updated_at":     updatedAtStr,
 	})
 }
