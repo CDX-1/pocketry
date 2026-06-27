@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/CDX-1/pocketry/internal/vault"
 )
 
 const (
@@ -58,18 +60,12 @@ func validateAuthRequest(req *AuthRequest) error {
 }
 
 func validateVaultRequest(req *VaultRequest) error {
-	req.EncryptedBlob = strings.TrimSpace(req.EncryptedBlob)
-
-	if req.EncryptedBlob == "" {
-		return errors.New("encrypted_blob is required")
-	}
-
-	if len(req.EncryptedBlob) > maxVaultBodyBytes {
-		return errors.New("encrypted_blob is too large")
-	}
-
 	if req.ExpectedRevision < 0 {
 		return errors.New("expected_revision cannot be negative")
+	}
+
+	if err := vault.ValidateEnvelope(req.EncryptedBlob); err != nil {
+		return err
 	}
 
 	return nil
