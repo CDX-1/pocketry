@@ -45,7 +45,7 @@ func makeJSONRequest(t *testing.T, method string, path string, body any, token s
 	req.Header.Set("Content-Type", "application/json")
 
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer " + token)
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	return req
@@ -71,7 +71,7 @@ func TestRegisterLoginSaveAndGetVault(t *testing.T) {
 		Username: "username",
 		Password: "StrongPassword123!",
 	}, "")
-	
+
 	registerRR := httptest.NewRecorder()
 	server.ServeHTTP(registerRR, registerReq)
 
@@ -83,7 +83,7 @@ func TestRegisterLoginSaveAndGetVault(t *testing.T) {
 		Username: "username",
 		Password: "StrongPassword123!",
 	}, "")
-	
+
 	loginRR := httptest.NewRecorder()
 	server.ServeHTTP(loginRR, loginReq)
 
@@ -99,13 +99,14 @@ func TestRegisterLoginSaveAndGetVault(t *testing.T) {
 	}
 
 	saveReq := makeJSONRequest(t, http.MethodPost, "/api/vault", VaultRequest{
-		EncryptedBlob: "placeholder-vault-blob",
+		EncryptedBlob:    "placeholder-vault-blob",
+		ExpectedRevision: 0,
 	}, token)
 
 	saveRR := httptest.NewRecorder()
 	server.ServeHTTP(saveRR, saveReq)
 
-	if saveRR.Code != http.StatusOK {
+	if saveRR.Code != http.StatusCreated {
 		t.Fatalf("expected save vault status: %d, got %d body=%s", http.StatusOK, saveRR.Code, saveRR.Body.String())
 	}
 
@@ -118,10 +119,14 @@ func TestRegisterLoginSaveAndGetVault(t *testing.T) {
 		t.Fatalf("expected get vault status %d, got %d body=%s", http.StatusOK, getRR.Code, getRR.Body.String())
 	}
 
-	getBody := decodeResponse[map[string]string](t, getRR)
+	getBody := decodeResponse[map[string]any](t, getRR)
 
 	if getBody["encrypted_blob"] != "placeholder-vault-blob" {
 		t.Fatalf("unexpected vault blob: %q", getBody["encrypted_blob"])
+	}
+
+	if getBody["revision"].(float64) != 1 {
+		t.Fatalf("expected revision 1, got %v", getBody["revision"])
 	}
 }
 
@@ -241,5 +246,73 @@ func TestRegisterRejectsUnknownJSONField(t *testing.T) {
 
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d body=%s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	}
+}
+
+// checks whether a concurrent update to vault is rejected
+func TestVaultRevisionConflict(t *testing.T) {
+	server := setupTestServer(t)
+
+	registerReq := makeJSONRequest(t, http.MethodPost, "/api/register", AuthRequest{
+		Username: "username",
+		Password: "StrongPassword123!",
+	}, "")
+
+	registerRR := httptest.NewRecorder()
+	server.ServeHTTP(registerRR, registerReq)
+
+	if registerRR.Code != http.StatusCreated {
+		t.Fatalf("expected register status %d, got %d body=%s", http.StatusCreated, registerRR.Code, registerRR.Body.String())
+	}
+
+	loginReq := makeJSONRequest(t, http.MethodPost, "/api/login", AuthRequest{
+		Username: "username",
+		Password: "StrongPassword123!",
+	}, "")
+
+	loginRR := httptest.NewRecorder()
+	server.ServeHTTP(loginRR, loginReq)
+
+	if loginRR.Code != http.StatusOK {
+		t.Fatalf("expected login status %d, got %d body=%s", http.StatusOK, loginRR.Code, loginRR.Body.String())
+	}
+
+	loginBody := decodeResponse[map[string]string](t, loginRR)
+	token := loginBody["token"]
+
+	createReq := makeJSONRequest(t, http.MethodPost, "/api/vault", VaultRequest{
+		EncryptedBlob:    "revision-1-data",
+		ExpectedRevision: 0,
+	}, token)
+
+	createRR := httptest.NewRecorder()
+	server.ServeHTTP(createRR, createReq)
+
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("expected create vault status %d, got %d body=%s", http.StatusCreated, createRR.Code, createRR.Body.String())
+	}
+
+	updateReq := makeJSONRequest(t, http.MethodPost, "/api/vault", VaultRequest{
+		EncryptedBlob:    "revision-2-data",
+		ExpectedRevision: 1,
+	}, token)
+
+	updateRR := httptest.NewRecorder()
+	server.ServeHTTP(updateRR, updateReq)
+
+	if updateRR.Code != http.StatusOK {
+		t.Fatalf("expected update vault status %d, got %d body=%s", http.StatusOK, updateRR.Code, updateRR.Body.String())
+	}
+
+	conflictReq := makeJSONRequest(t, http.MethodPost, "/api/vault", VaultRequest{
+		EncryptedBlob:    "stale-device-data",
+		ExpectedRevision: 1,
+	}, token)
+
+	conflictRR := httptest.NewRecorder()
+	server.ServeHTTP(conflictRR, conflictReq)
+
+	if conflictRR.Code != http.StatusConflict {
+		t.Fatalf("expected conflict status %d, got %d body=%s", http.StatusConflict, conflictRR.Code, conflictRR.Body.String())
 	}
 }

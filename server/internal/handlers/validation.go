@@ -68,5 +68,9 @@ func validateVaultRequest(req *VaultRequest) error {
 		return errors.New("encrypted_blob is too large")
 	}
 
+	if req.ExpectedRevision < 0 {
+		return errors.New("expected_revision cannot be negative")
+	}
+
 	return nil
 }
