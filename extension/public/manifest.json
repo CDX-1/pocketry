@@ -1,0 +1,12 @@
+{
+    "manifest_version": 3,
+    "name": "Pocketry",
+    "version": "0.1.0",
+    "description": "Zero-knowledge self-hostable password manager.",
+    "action": {
+        "default_popup": "index.html",
+        "default_title": "Pocketry"
+    },
+    "permissions": ["storage", "tabs", "activeTab"],
+    "host_permissions": ["http://localhost:5173/*"]
+}
