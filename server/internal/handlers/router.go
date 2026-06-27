@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/CDX-1/pocketry/internal/auth"
 	"github.com/CDX-1/pocketry/internal/db"
+	"github.com/CDX-1/pocketry/internal/vault"
 )
 
 type AuthRequest struct {
@@ -14,14 +16,14 @@ type AuthRequest struct {
 }
 
 type VaultRequest struct {
-	EncryptedBlob    string `json:"encrypted_blob"`
-	ExpectedRevision int64  `json:"expected_revision"`
+	EncryptedBlob    vault.Envelope `json:"encrypted_blob"`
+	ExpectedRevision int64          `json:"expected_revision"`
 }
 
 type VaultResponse struct {
-	EncryptedBlob string `json:"encrypted_blob"`
-	Revision      int64  `json:"revision"`
-	UpdatedAt	  string `json:"updated_at"`
+	EncryptedBlob vault.Envelope `json:"encrypted_blob"`
+	Revision      int64  		 `json:"revision"`
+	UpdatedAt     string 		 `json:"updated_at"`
 }
 
 func RegisterRoutes() *http.ServeMux {
@@ -155,11 +157,17 @@ func handleSaveVault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	encryptedBlobJSON, err := json.Marshal(req.EncryptedBlob)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid encrypted_blob")
+		return
+	}
+
 	// create new vault if expected revision is 0
 	if req.ExpectedRevision == 0 {
 		err = db.Q.CreateVault(r.Context(), db.CreateVaultParams{
-			UserID: 	userID,
-			EncryptedBlob: req.EncryptedBlob,
+			UserID:        userID,
+			EncryptedBlob: string(encryptedBlobJSON),
 		})
 
 		if err != nil {
@@ -168,16 +176,16 @@ func handleSaveVault(w http.ResponseWriter, r *http.Request) {
 		}
 
 		writeJSON(w, http.StatusCreated, map[string]any{
-			"status": "vault created",
+			"status":   "vault created",
 			"revision": 1,
 		})
 		return
 	}
 
 	rowsAffected, err := db.Q.UpdateVaultIfRevisionMatches(r.Context(), db.UpdateVaultIfRevisionMatchesParams{
-		EncryptedBlob: req.EncryptedBlob,
-		UserID: 	   userID,
-		Revision: 	   req.ExpectedRevision,
+		EncryptedBlob: string(encryptedBlobJSON),
+		UserID:        userID,
+		Revision:      req.ExpectedRevision,
 	})
 
 	if err != nil {
@@ -191,7 +199,7 @@ func handleSaveVault(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "vault synced",
+		"status":   "vault synced",
 		"revision": req.ExpectedRevision + 1,
 	})
 }
@@ -203,15 +211,26 @@ func handleGetVault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vault, err := db.Q.GetVaultByUserID(r.Context(), userID)
+	vaultRecord, err := db.Q.GetVaultByUserID(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "vault not found")
 		return
 	}
 
+	var env vault.Envelope
+	if err := json.Unmarshal([]byte(vaultRecord.EncryptedBlob), &env); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to unmarshal vault")
+		return
+	}
+
+	var updatedAtStr string
+    if vaultRecord.UpdatedAt.Valid {
+        updatedAtStr = vaultRecord.UpdatedAt.Time.Format(time.RFC3339)
+    }
+
 	writeJSON(w, http.StatusOK, map[string]any{
-		"encrypted_blob": vault.EncryptedBlob,
-		"revision":       vault.Revision,
-		"updated_at":      vault.UpdatedAt,
+		"encrypted_blob": env,
+		"revision":       vaultRecord.Revision,
+		"updated_at":     updatedAtStr,
 	})
 }

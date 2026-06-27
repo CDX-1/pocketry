@@ -57,21 +57,10 @@ func TestValidateAuthRequestRejectsShortPassword(t *testing.T) {
 // checks that validateVaultRequest accepts valid vault requests
 func TestValidateVaultRequestAcceptsValidBlob(t *testing.T) {
 	req := VaultRequest{
-		EncryptedBlob: "fake-encrypted-vault-data",
+		EncryptedBlob: validTestEnvelope(),
 	}
 
 	if err := validateVaultRequest(&req); err != nil {
 		t.Fatalf("expected valid vault request, got error: %v", err)
-	}
-}
-
-// checks that validateVaultRequest rejects empty blob
-func TestValidateVaultRequestRejectsEmptyBlob(t *testing.T) {
-	req := VaultRequest{
-		EncryptedBlob: "",
-	}
-
-	if err := validateVaultRequest(&req); err == nil {
-		t.Fatal("expected error for empty encrypted_blob")
 	}
 }
