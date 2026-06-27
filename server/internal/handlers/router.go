@@ -14,7 +14,14 @@ type AuthRequest struct {
 }
 
 type VaultRequest struct {
+	EncryptedBlob    string `json:"encrypted_blob"`
+	ExpectedRevision int64  `json:"expected_revision"`
+}
+
+type VaultResponse struct {
 	EncryptedBlob string `json:"encrypted_blob"`
+	Revision      int64  `json:"revision"`
+	UpdatedAt	  string `json:"updated_at"`
 }
 
 func RegisterRoutes() *http.ServeMux {
@@ -148,17 +155,44 @@ func handleSaveVault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = db.Q.SaveVault(r.Context(), db.SaveVaultParams{
-		UserID:        userID,
+	// create new vault if expected revision is 0
+	if req.ExpectedRevision == 0 {
+		err = db.Q.CreateVault(r.Context(), db.CreateVaultParams{
+			UserID: 	userID,
+			EncryptedBlob: req.EncryptedBlob,
+		})
+
+		if err != nil {
+			writeError(w, http.StatusConflict, "vault already exists")
+			return
+		}
+
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"status": "vault created",
+			"revision": 1,
+		})
+		return
+	}
+
+	rowsAffected, err := db.Q.UpdateVaultIfRevisionMatches(r.Context(), db.UpdateVaultIfRevisionMatchesParams{
 		EncryptedBlob: req.EncryptedBlob,
+		UserID: 	   userID,
+		Revision: 	   req.ExpectedRevision,
 	})
+
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save vault")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
+	if rowsAffected == 0 {
+		writeError(w, http.StatusConflict, "vault has been updated by another client; please try again")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "vault synced",
+		"revision": req.ExpectedRevision + 1,
 	})
 }
 
@@ -169,13 +203,15 @@ func handleGetVault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	blob, err := db.Q.GetVaultByUserID(r.Context(), userID)
+	vault, err := db.Q.GetVaultByUserID(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "vault not found")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{
-		"encrypted_blob": blob,
+	writeJSON(w, http.StatusOK, map[string]any{
+		"encrypted_blob": vault.EncryptedBlob,
+		"revision":       vault.Revision,
+		"updated_at":      vault.UpdatedAt,
 	})
 }

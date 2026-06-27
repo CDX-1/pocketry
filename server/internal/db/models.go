@@ -28,5 +28,6 @@ type Vault struct {
 	ID            int64
 	UserID        int64
 	EncryptedBlob string
+	Revision      int64
 	UpdatedAt     sql.NullTime
 }

@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -24,7 +25,7 @@ type CreateSessionParams struct {
 	ExpiresAt time.Time
 }
 
-// Creates a new session for a user allowing vault access.
+// CreateSession creates a new active session for a user, mapping their user ID to a hashed session token with an expiration timestamp.
 func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) error {
 	_, err := q.db.ExecContext(ctx, createSession, arg.UserID, arg.TokenHash, arg.ExpiresAt)
 	return err
@@ -42,20 +43,38 @@ type CreateUserParams struct {
 	PasswordHash string
 }
 
-// :exec tells sqlc this query modifies the database but doesn't return any rows.
+// CreateUser registers a new user in the system with a unique username and a hashed password.
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
 	_, err := q.db.ExecContext(ctx, createUser, arg.Username, arg.PasswordHash)
 	return err
 }
 
-const deleteSession = `-- name: DeleteSession :exec
+const createVault = `-- name: CreateVault :exec
+INSERT INTO vaults (
+    user_id,
+    encrypted_blob
+) VALUES (?, ?)
+`
+
+type CreateVaultParams struct {
+	UserID        int64
+	EncryptedBlob string
+}
+
+// CreateVault initializes a new encrypted storage vault for a specific user.
+func (q *Queries) CreateVault(ctx context.Context, arg CreateVaultParams) error {
+	_, err := q.db.ExecContext(ctx, createVault, arg.UserID, arg.EncryptedBlob)
+	return err
+}
+
+const deleteSessionByTokenHash = `-- name: DeleteSessionByTokenHash :exec
 DELETE FROM sessions
 WHERE token_hash = ?
 `
 
-// Deletes a session by its corresponding token hash.
-func (q *Queries) DeleteSession(ctx context.Context, tokenHash string) error {
-	_, err := q.db.ExecContext(ctx, deleteSession, tokenHash)
+// DeleteSessionByTokenHash permanently removes a session by its token hash. Typically invoked during user logout.
+func (q *Queries) DeleteSessionByTokenHash(ctx context.Context, tokenHash string) error {
+	_, err := q.db.ExecContext(ctx, deleteSessionByTokenHash, tokenHash)
 	return err
 }
 
@@ -67,7 +86,7 @@ AND expires_at > CURRENT_TIMESTAMP
 LIMIT 1
 `
 
-// Retrives a session by its corresponding token hash.
+// GetSessionByTokenHash retrieves the user ID associated with a session token, provided the session has not expired yet.
 func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (int64, error) {
 	row := q.db.QueryRowContext(ctx, getSessionByTokenHash, tokenHash)
 	var user_id int64
@@ -76,57 +95,70 @@ func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, password_hash 
-FROM users 
-WHERE username = ? 
+SELECT id, username, password_hash
+FROM users
+WHERE username = ?
 LIMIT 1
 `
 
 type GetUserByUsernameRow struct {
 	ID           int64
+	Username     string
 	PasswordHash string
 }
 
-// :one tells sqlc to expect exactly one row and scan it directly into a struct.
+// GetUserByUsername retrieves a user's ID, username, and password hash by their username.
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
 	row := q.db.QueryRowContext(ctx, getUserByUsername, username)
 	var i GetUserByUsernameRow
-	err := row.Scan(&i.ID, &i.PasswordHash)
+	err := row.Scan(&i.ID, &i.Username, &i.PasswordHash)
 	return i, err
 }
 
 const getVaultByUserID = `-- name: GetVaultByUserID :one
-SELECT encrypted_blob 
-FROM vaults 
-WHERE user_id = ? 
+SELECT encrypted_blob, revision, updated_at
+FROM vaults
+WHERE user_id = ?
 LIMIT 1
 `
 
-// Fetches just the encrypted string blob for a specific user ID.
-func (q *Queries) GetVaultByUserID(ctx context.Context, userID int64) (string, error) {
-	row := q.db.QueryRowContext(ctx, getVaultByUserID, userID)
-	var encrypted_blob string
-	err := row.Scan(&encrypted_blob)
-	return encrypted_blob, err
+type GetVaultByUserIDRow struct {
+	EncryptedBlob string
+	Revision      int64
+	UpdatedAt     sql.NullTime
 }
 
-const saveVault = `-- name: SaveVault :exec
-INSERT INTO vaults (
-    user_id, 
-    encrypted_blob
-) VALUES (?, ?)
-ON CONFLICT(user_id) DO UPDATE SET 
-    encrypted_blob = excluded.encrypted_blob, 
+// GetVaultByUserID fetches the encrypted data blob, current revision number, and last update timestamp for a user's vault.
+func (q *Queries) GetVaultByUserID(ctx context.Context, userID int64) (GetVaultByUserIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getVaultByUserID, userID)
+	var i GetVaultByUserIDRow
+	err := row.Scan(&i.EncryptedBlob, &i.Revision, &i.UpdatedAt)
+	return i, err
+}
+
+const updateVaultIfRevisionMatches = `-- name: UpdateVaultIfRevisionMatches :execrows
+UPDATE vaults
+SET 
+    encrypted_blob = ?,
+    revision = revision + 1,
     updated_at = CURRENT_TIMESTAMP
+WHERE user_id = ?
+AND revision = ?
 `
 
-type SaveVaultParams struct {
-	UserID        int64
+type UpdateVaultIfRevisionMatchesParams struct {
 	EncryptedBlob string
+	UserID        int64
+	Revision      int64
 }
 
-// This handles the upsert logic. If a vault for the user exists, overwrite it; otherwise, create it.
-func (q *Queries) SaveVault(ctx context.Context, arg SaveVaultParams) error {
-	_, err := q.db.ExecContext(ctx, saveVault, arg.UserID, arg.EncryptedBlob)
-	return err
+// UpdateVaultIfRevisionMatches implements optimistic concurrency control to update a user's vault.
+// It increments the vault revision and updates the blob only if the provided revision matches the current state in the database.
+// Returns the number of affected rows (0 means a conflict occurred and the update failed).
+func (q *Queries) UpdateVaultIfRevisionMatches(ctx context.Context, arg UpdateVaultIfRevisionMatchesParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, updateVaultIfRevisionMatches, arg.EncryptedBlob, arg.UserID, arg.Revision)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
