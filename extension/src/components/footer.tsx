@@ -1,4 +1,3 @@
-import { useState } from "react";
 import {
     Select,
     SelectContent,
@@ -10,32 +9,31 @@ import {
 import { Button } from "../components/ui/button";
 import { PlusIcon, Settings2Icon } from "lucide-react";
 import { Link } from "react-router-dom";
-
-const SERVERS = [
-    {
-        id: "server1",
-        name: "Server 1",
-        url: "http://localhost:3000",
-    },
-    {
-        id: "server2",
-        name: "Server 2",
-        url: "http://localhost:4000",
-    },
-];
+import { useServers } from "../components/context/servers-provider";
 
 function Footer() {
-    const [selectedServerId, setSelectedServerId] = useState<string>("");
+    const {
+        servers,
+        selectedServerId,
+        selectedServer,
+        selectServer,
+    } = useServers();
 
-    const selectedServer = SERVERS.find(
-        (server) => server.id === selectedServerId
-    );
+    const hasServers = servers.length > 0;
 
     return (
-        <div className="flex justify-between items-center gap-2 border-t border-border/5 bg-muted p-3">
-            <Select value={selectedServerId} onValueChange={setSelectedServerId}>
-                <SelectTrigger className="h-9 w-[280px]">
-                    {selectedServer ? (
+        <div className="flex items-center justify-between gap-2 border-t border-border/5 bg-muted p-3">
+            <Select
+                value={selectedServerId}
+                onValueChange={selectServer}
+                disabled={!hasServers}
+            >
+                <SelectTrigger className="h-9 w-full min-w-0">
+                    {!hasServers ? (
+                        <span className="truncate text-sm text-muted-foreground">
+                            No servers, + to add a server
+                        </span>
+                    ) : selectedServer ? (
                         <span className="flex w-full min-w-0 items-center justify-between gap-3 pr-1">
                             <span className="max-w-[110px] truncate text-sm font-medium text-foreground">
                                 {selectedServer.name}
@@ -58,7 +56,7 @@ function Footer() {
                     className="w-[280px]"
                 >
                     <SelectGroup>
-                        {SERVERS.map((server) => (
+                        {servers.map((server) => (
                             <SelectItem
                                 key={server.id}
                                 value={server.id}
@@ -79,11 +77,11 @@ function Footer() {
                 </SelectContent>
             </Select>
 
-            <Button size="sm" variant="ghost" className="h-9">
+            <Button size="sm" variant="ghost" className="h-9 shrink-0">
                 <Settings2Icon className="size-4" />
             </Button>
 
-            <Link to="/add-server">
+            <Link to="/add-server" className="shrink-0">
                 <Button size="sm" variant="ghost" className="h-9">
                     <PlusIcon className="size-4" />
                 </Button>

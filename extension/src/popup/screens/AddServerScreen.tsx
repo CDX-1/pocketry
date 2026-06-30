@@ -1,4 +1,6 @@
 import { type FormEvent, useState } from "react";
+import { useNavigate } from "react-router-dom";
+
 import { Button } from "../../components/ui/button";
 import {
     Field,
@@ -9,21 +11,38 @@ import {
     FieldSet,
 } from "../../components/ui/field";
 import { Input } from "../../components/ui/input";
+import { useServers } from "../../components/context/servers-provider";
 
 function AddServerScreen() {
+    const navigate = useNavigate();
+    const { addServer } = useServers();
+
     const [serverName, setServerName] = useState("");
     const [serverUrl, setServerUrl] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
-    function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    async function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
 
         const normalizedServerName = serverName.trim();
         const normalizedServerUrl = serverUrl.trim();
 
-        console.log("Server:", {
-            name: normalizedServerName,
-            url: normalizedServerUrl,
-        });
+        if (!normalizedServerName || !normalizedServerUrl) {
+            return;
+        }
+
+        setIsSubmitting(true);
+
+        try {
+            await addServer({
+                name: normalizedServerName,
+                url: normalizedServerUrl,
+            });
+
+            navigate("/dashboard");
+        } finally {
+            setIsSubmitting(false);
+        }
     }
 
     return (
@@ -49,6 +68,7 @@ function AddServerScreen() {
                             placeholder="Self-hosted server"
                             value={serverName}
                             onChange={(event) => setServerName(event.target.value)}
+                            disabled={isSubmitting}
                             required
                         />
                     </Field>
@@ -57,7 +77,7 @@ function AddServerScreen() {
                         <FieldLabel htmlFor="server-url">Server URL</FieldLabel>
 
                         <FieldDescription className="text-xs">
-                            The server's URL.
+                            The server&apos;s URL.
                         </FieldDescription>
 
                         <Input
@@ -66,11 +86,14 @@ function AddServerScreen() {
                             placeholder="https://example.com"
                             value={serverUrl}
                             onChange={(event) => setServerUrl(event.target.value)}
+                            disabled={isSubmitting}
                             required
                         />
                     </Field>
 
-                    <Button size="lg" type="submit">Add server</Button>
+                    <Button size="lg" type="submit" disabled={isSubmitting}>
+                        {isSubmitting ? "Adding..." : "Add server"}
+                    </Button>
                 </FieldGroup>
             </FieldSet>
         </form>
