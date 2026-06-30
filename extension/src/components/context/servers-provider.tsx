@@ -22,6 +22,11 @@ type ServersContextValue = {
     selectedServer?: StoredServer;
     isLoading: boolean;
     addServer: (server: Omit<StoredServer, "id">) => Promise<StoredServer>;
+    updateServer: (
+        serverId: string,
+        updates: { name: string; url: string }
+    ) => Promise<void>;
+    deleteServer: (serverId: string) => Promise<void>;
     selectServer: (serverId: string) => Promise<void>;
     refreshServers: () => Promise<void>;
 };
@@ -91,6 +96,41 @@ export function ServersProvider({ children }: { children: ReactNode }) {
         []
     );
 
+    const updateServer = useCallback(
+        async (serverId: string, updates: { name: string; url: string }) => {
+            const nextServers = servers.map((server) =>
+                server.id === serverId
+                    ? {
+                        ...server,
+                        name: updates.name,
+                        url: updates.url,
+                    }
+                    : server
+            );
+
+            setServers(nextServers);
+            await saveServers(nextServers);
+        },
+        [servers]
+    );
+
+    const deleteServer = useCallback(
+        async (serverId: string) => {
+            const nextServers = servers.filter((server) => server.id !== serverId);
+
+            await saveServers(nextServers);
+            setServers(nextServers);
+
+            if (selectedServerId === serverId) {
+                const nextSelectedServerId = nextServers[0]?.id ?? "";
+
+                await saveSelectedServerId(nextSelectedServerId);
+                setSelectedServerId(nextSelectedServerId);
+            }
+        },
+        [servers, selectedServerId]
+    );
+
     const value = useMemo(
         () => ({
             servers,
@@ -98,6 +138,8 @@ export function ServersProvider({ children }: { children: ReactNode }) {
             selectedServer,
             isLoading,
             addServer,
+            updateServer,
+            deleteServer,
             selectServer,
             refreshServers,
         }),
@@ -107,6 +149,8 @@ export function ServersProvider({ children }: { children: ReactNode }) {
             selectedServer,
             isLoading,
             addServer,
+            updateServer,
+            deleteServer,
             selectServer,
             refreshServers,
         ]
