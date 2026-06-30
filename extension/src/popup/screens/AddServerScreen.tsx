@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from "react";
-import { Button } from "../../../components/ui/button";
+import { Button } from "../../components/ui/button";
 import {
     Field,
     FieldDescription,
@@ -7,8 +7,8 @@ import {
     FieldLabel,
     FieldLegend,
     FieldSet,
-} from "../../../components/ui/field";
-import { Input } from "../../../components/ui/input";
+} from "../../components/ui/field";
+import { Input } from "../../components/ui/input";
 
 function AddServerScreen() {
     const [serverName, setServerName] = useState("");
@@ -27,7 +27,7 @@ function AddServerScreen() {
     }
 
     return (
-        <form className="flex h-full flex-col justify-end mb-2" onSubmit={handleSubmit}>
+        <form className="flex h-full flex-col justify-end pb-8" onSubmit={handleSubmit}>
             <FieldSet>
                 <FieldLegend>Add new server</FieldLegend>
 
