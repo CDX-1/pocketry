@@ -5,29 +5,41 @@
 package db
 
 import (
-	"database/sql"
 	"time"
 )
 
-type Session struct {
-	ID        int64
-	UserID    int64
-	TokenHash string
-	ExpiresAt time.Time
-	CreatedAt sql.NullTime
+type PendingLogin struct {
+	ID          string
+	UserID      int64
+	ServerState []byte
+	ExpiresAt   time.Time
+	CreatedAt   time.Time
+}
+
+type PendingRegistration struct {
+	ID                 string
+	Username           string
+	UsernameNormalized string
+	ServerState        []byte
+	ExpiresAt          time.Time
+	CreatedAt          time.Time
 }
 
 type User struct {
-	ID           int64
-	Username     string
-	PasswordHash string
-	CreatedAt    sql.NullTime
+	ID                       int64
+	Username                 string
+	UsernameNormalized       string
+	OpaqueRegistrationRecord []byte
+	CryptoPolicyVersion      int64
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }
 
 type Vault struct {
 	ID            int64
 	UserID        int64
-	EncryptedBlob string
+	EncryptedBlob []byte
 	Revision      int64
-	UpdatedAt     sql.NullTime
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
