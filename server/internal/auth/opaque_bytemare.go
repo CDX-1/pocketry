@@ -31,30 +31,23 @@ type StoredOpaqueRecord struct {
 	RegistrationRecord string `json:"registration_record"`
 }
 
-func NewBytemareOpaqueServer(serverIdentity string, encodedServerKeyMaterial []byte) (*BytemareOpaqueServer, error) {
+func NewBytemareOpaqueServer(
+	serverIdentity string,
+	serializedServerKeyMaterial []byte,
+) (*BytemareOpaqueServer, error) {
 	conf := bytemare.DefaultConfiguration()
 
 	if serverIdentity == "" {
 		serverIdentity = defaultOpaqueServerIdentity
 	}
 
-	var skm *bytemare.ServerKeyMaterial
+	if len(serializedServerKeyMaterial) == 0 {
+		return nil, fmt.Errorf("OPAQUE server key material is required")
+	}
 
-	if len(encodedServerKeyMaterial) > 0 {
-		decoded, err := conf.DecodeServerKeyMaterial(encodedServerKeyMaterial)
-		if err != nil {
-			return nil, fmt.Errorf("decode OPAQUE server key material %w", err)
-		}
-		skm = decoded
-	} else {
-		privateKey, publicKey := conf.KeyGen()
-
-		skm = &bytemare.ServerKeyMaterial{
-			Identity:       []byte(serverIdentity),
-			PrivateKey:     privateKey,
-			PublicKeyBytes: publicKey.Encode(),
-			OPRFGlobalSeed: conf.GenerateOPRFSeed(),
-		}
+	skm, err := conf.DecodeServerKeyMaterial(serializedServerKeyMaterial)
+	if err != nil {
+		return nil, fmt.Errorf("decode OPAQUE server key material: %w", err)
 	}
 
 	skm.Identity = []byte(serverIdentity)
@@ -69,9 +62,9 @@ func NewBytemareOpaqueServer(serverIdentity string, encodedServerKeyMaterial []b
 	}
 
 	return &BytemareOpaqueServer{
-		conf:	  conf,
+		conf:     conf,
 		serverID: []byte(serverIdentity),
-		skm:	  skm,
+		skm:      skm,
 	}, nil
 }
 
