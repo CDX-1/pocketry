@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -164,8 +167,9 @@ func (h *Handler) handleRegisterStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = db.Q.DeleteExpiredPendingRegistrations(r.Context())
-	_ = db.Q.DeletePendingRegistrationsByUsernameNormalized(r.Context(), usernameNormalized)
+	if err := db.Q.DeleteExpiredPendingRegistrations(r.Context()); err != nil {
+		log.Printf("delete expired pending registrations: %v", err)
+	}
 
 	err = db.Q.CreatePendingRegistration(r.Context(), db.CreatePendingRegistrationParams{
 		ID:                 registrationID,
@@ -204,21 +208,27 @@ func (h *Handler) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pending, err := db.Q.GetPendingRegistration(r.Context(), req.RegistrationID)
+	clientMessage, err := base64.RawURLEncoding.DecodeString(req.ClientMessage)
 	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid client message")
+		return
+	}
+
+	pending, err := db.Q.ConsumePendingRegistration(
+		r.Context(),
+		req.RegistrationID,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusBadRequest, "registration not found or expired")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to consume registration")
 		return
 	}
 
 	if time.Now().After(pending.ExpiresAt) {
-		_ = db.Q.DeletePendingRegistration(r.Context(), req.RegistrationID)
 		writeError(w, http.StatusBadRequest, "registration expired")
-		return
-	}
-
-	clientMessage, err := base64.RawURLEncoding.DecodeString(req.ClientMessage)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid client message")
 		return
 	}
 
@@ -237,8 +247,6 @@ func (h *Handler) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "username already exists")
 		return
 	}
-
-	_ = db.Q.DeletePendingRegistration(r.Context(), req.RegistrationID)
 
 	user, err := db.Q.GetUserByUsernameNormalized(r.Context(), pending.UsernameNormalized)
 	if err != nil {
@@ -300,8 +308,9 @@ func (h *Handler) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = db.Q.DeleteExpiredPendingLogins(r.Context())
-	_ = db.Q.DeletePendingLoginsByUserID(r.Context(), user.ID)
+	if err := db.Q.DeleteExpiredPendingLogins(r.Context()); err != nil {
+		log.Printf("delete expired pending logins: %v", err)
+	}
 
 	err = db.Q.CreatePendingLogin(r.Context(), db.CreatePendingLoginParams{
 		ID:          loginID,
@@ -339,21 +348,24 @@ func (h *Handler) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pending, err := db.Q.GetPendingLogin(r.Context(), req.LoginID)
+	clientMessage, err := base64.RawURLEncoding.DecodeString(req.ClientMessage)
 	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid client message")
+		return
+	}
+
+	pending, err := db.Q.ConsumePendingLogin(r.Context(), req.LoginID)
+	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to consume login")
 		return
 	}
 
 	if time.Now().After(pending.ExpiresAt) {
-		_ = db.Q.DeletePendingLogin(r.Context(), req.LoginID)
 		writeError(w, http.StatusUnauthorized, "login expired")
-		return
-	}
-
-	clientMessage, err := base64.RawURLEncoding.DecodeString(req.ClientMessage)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid client message")
 		return
 	}
 
@@ -367,8 +379,6 @@ func (h *Handler) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to issue access token")
 		return
 	}
-
-	_ = db.Q.DeletePendingLogin(r.Context(), req.LoginID)
 
 	writeJSON(w, http.StatusOK, LoginFinishResponse{
 		AccessToken: accessToken,

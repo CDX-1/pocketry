@@ -62,6 +62,15 @@ FROM pending_registrations
 WHERE id = ?
 LIMIT 1;
 
+-- name: ConsumePendingRegistration :one
+DELETE FROM pending_registrations
+WHERE id = ?
+RETURNING
+	username,
+	username_normalized,
+	server_state,
+	expires_at;
+
 -- DeletePendingRegistration removes pending OPAQUE registration state after completion or cancellation.
 -- name: DeletePendingRegistration :exec
 DELETE FROM pending_registrations
@@ -97,6 +106,14 @@ SELECT
 FROM pending_logins
 WHERE id = ?
 LIMIT 1;
+
+-- name: ConsumePendingLogin :one
+DELETE FROM pending_logins
+WHERE id = ?
+RETURNING
+	user_id,
+	server_state,
+	expires_at;
 
 -- DeletePendingLogin removes pending OPAQUE login state after completion or cancellation.
 -- name: DeletePendingLogin :exec

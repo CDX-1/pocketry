@@ -10,6 +10,57 @@ import (
 	"time"
 )
 
+const consumePendingLogin = `-- name: ConsumePendingLogin :one
+DELETE FROM pending_logins
+WHERE id = ?
+RETURNING
+	user_id,
+	server_state,
+	expires_at
+`
+
+type ConsumePendingLoginRow struct {
+	UserID      int64
+	ServerState []byte
+	ExpiresAt   time.Time
+}
+
+func (q *Queries) ConsumePendingLogin(ctx context.Context, id string) (ConsumePendingLoginRow, error) {
+	row := q.db.QueryRowContext(ctx, consumePendingLogin, id)
+	var i ConsumePendingLoginRow
+	err := row.Scan(&i.UserID, &i.ServerState, &i.ExpiresAt)
+	return i, err
+}
+
+const consumePendingRegistration = `-- name: ConsumePendingRegistration :one
+DELETE FROM pending_registrations
+WHERE id = ?
+RETURNING
+	username,
+	username_normalized,
+	server_state,
+	expires_at
+`
+
+type ConsumePendingRegistrationRow struct {
+	Username           string
+	UsernameNormalized string
+	ServerState        []byte
+	ExpiresAt          time.Time
+}
+
+func (q *Queries) ConsumePendingRegistration(ctx context.Context, id string) (ConsumePendingRegistrationRow, error) {
+	row := q.db.QueryRowContext(ctx, consumePendingRegistration, id)
+	var i ConsumePendingRegistrationRow
+	err := row.Scan(
+		&i.Username,
+		&i.UsernameNormalized,
+		&i.ServerState,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
 const createPendingLogin = `-- name: CreatePendingLogin :exec
 INSERT INTO pending_logins (
 	id,
