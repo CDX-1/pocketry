@@ -12,9 +12,18 @@ import (
 	"github.com/CDX-1/pocketry/internal/vault"
 )
 
+const (
+	pendingAuthTTL = 10 * time.Minute
+	accessTokenTTL = 15 * time.Minute
+)
+
+type Handler struct {
+	opaque auth.OpaqueServer
+}
+
 // request/response structs
 type RegisterStartRequest struct {
-	Username	  string `json:"username"`
+	Username      string `json:"username"`
 	ClientMessage string `json:"client_message"`
 }
 
@@ -29,40 +38,57 @@ type RegisterFinishRequest struct {
 }
 
 type LoginStartRequest struct {
-	Username	  string `json:"username"`
+	Username      string `json:"username"`
 	ClientMessage string `json:"client_message"`
 }
 
 type LoginStartResponse struct {
-	LoginID 	  string `json:"login_id"`
+	LoginID       string `json:"login_id"`
 	ServerMessage string `json:"server_message"`
 }
 
 type LoginFinishRequest struct {
-	LoginID	  	  string `json:"login_id"`
+	LoginID       string `json:"login_id"`
 	ClientMessage string `json:"client_message"`
 }
 
 type LoginFinishResponse struct {
 	AccessToken string `json:"access_token"`
-	ExpiresIn   int    `json:"expires_in"`
+	ExpiresIn   int64  `json:"expires_in"`
 }
 
-var opaqueServer auth.OpaqueServer
+type VaultRequest struct {
+	EncryptedBlob    vault.Envelope `json:"encrypted_blob"`
+	ExpectedRevision int64          `json:"expected_revision"`
+}
 
-func RegisterRoutes() *http.ServeMux {
+type VaultResponse struct {
+	EncryptedBlob vault.Envelope `json:"encrypted_blob"`
+	Revision      int64          `json:"revision"`
+	UpdatedAt     string         `json:"updated_at"`
+}
+
+func RegisterRoutes(opaque auth.OpaqueServer) *http.ServeMux {
+	if opaque == nil {
+		panic("handlers: opaque server is nil")
+	}
+
+	h := &Handler{
+		opaque: opaque,
+	}
+
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("POST /api/auth/register/start", handleRegisterStart)
-	mux.HandleFunc("POST /api/auth/register/finish", handleRegisterFinish)
+	mux.HandleFunc("POST /api/auth/register/start", h.handleRegisterStart)
+	mux.HandleFunc("POST /api/auth/register/finish", h.handleRegisterFinish)
 
-	mux.HandleFunc("POST /api/auth/login/start", handleLoginStart)
-	mux.HandleFunc("POST /api/auth/login/finish", handleLoginFinish)
+	mux.HandleFunc("POST /api/auth/login/start", h.handleLoginStart)
+	mux.HandleFunc("POST /api/auth/login/finish", h.handleLoginFinish)
 
-	mux.HandleFunc("GET /api/me", handleMe)
+	mux.HandleFunc("GET /api/me", h.handleMe)
 
-	mux.HandleFunc("POST /api/vault", handleSaveVault)
-	mux.HandleFunc("GET /api/vault", handleGetVault)
+	mux.HandleFunc("POST /api/vault", h.handleSaveVault)
+	mux.HandleFunc("GET /api/vault", h.handleGetVault)
 
 	return mux
 }
@@ -84,8 +110,8 @@ func requireAuth(r *http.Request) (int64, error) {
 	return claims.UserID, nil
 }
 
-// -- /api/register/start
-func handleRegisterStart(w http.ResponseWriter, r *http.Request) {
+// -- /api/auth/register/start
+func (h *Handler) handleRegisterStart(w http.ResponseWriter, r *http.Request) {
 	var req RegisterStartRequest
 
 	if err := decodeJSON(w, r, &req, maxAuthBodyBytes); err != nil {
@@ -96,8 +122,13 @@ func handleRegisterStart(w http.ResponseWriter, r *http.Request) {
 	username := strings.TrimSpace(req.Username)
 	usernameNormalized := auth.NormalizeUsername(username)
 
-	if username == "" {
-		writeError(w, http.StatusBadRequest, "username is required")
+	if err := validateUsername(username); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := validateOpaqueClientMessage(req.ClientMessage); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -118,7 +149,10 @@ func handleRegisterStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serverMessage, serverState, err := opaqueServer.RegisterStart(clientMessage)
+	serverMessage, serverState, err := h.opaque.RegisterStart(
+		[]byte(usernameNormalized),
+		clientMessage,
+	)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to start registration")
 		return
@@ -134,14 +168,15 @@ func handleRegisterStart(w http.ResponseWriter, r *http.Request) {
 	_ = db.Q.DeletePendingRegistrationsByUsernameNormalized(r.Context(), usernameNormalized)
 
 	err = db.Q.CreatePendingRegistration(r.Context(), db.CreatePendingRegistrationParams{
-		ID:					registrationID,
-		Username:			username,
+		ID:                 registrationID,
+		Username:           username,
 		UsernameNormalized: usernameNormalized,
-		ServerState: 		serverState,
-		ExpiresAt: 			time.Now().Add(10 * time.Minute),
+		ServerState:        serverState,
+		ExpiresAt:          time.Now().Add(pendingAuthTTL),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save pending registration")
+		return
 	}
 
 	writeJSON(w, http.StatusOK, RegisterStartResponse{
@@ -150,12 +185,22 @@ func handleRegisterStart(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// -- /api/register/finish
-func handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
+// -- /api/auth/register/finish
+func (h *Handler) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 	var req RegisterFinishRequest
 
 	if err := decodeJSON(w, r, &req, maxAuthBodyBytes); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := validateFlowID(req.RegistrationID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := validateOpaqueClientMessage(req.ClientMessage); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -177,15 +222,15 @@ func handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	registrationRecord, err := opaqueServer.RegisterFinish(pending.ServerState, clientMessage)
+	registrationRecord, err := h.opaque.RegisterFinish(pending.ServerState, clientMessage)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to finish registration")
 		return
 	}
 
 	err = db.Q.CreateUser(r.Context(), db.CreateUserParams{
-		Username:				  pending.Username,
-		UsernameNormalized: 	  pending.UsernameNormalized,
+		Username:                 pending.Username,
+		UsernameNormalized:       pending.UsernameNormalized,
 		OpaqueRegistrationRecord: registrationRecord,
 	})
 	if err != nil {
@@ -202,14 +247,14 @@ func handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"status": 	"registration successful",
-		"user_id":	user.ID,
+		"status":   "registration successful",
+		"user_id":  user.ID,
 		"username": user.Username,
 	})
 }
 
-// -- /api/login/start
-func handleLoginStart(w http.ResponseWriter, r *http.Request) {
+// -- /api/auth/login/start
+func (h *Handler) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 	var req LoginStartRequest
 
 	if err := decodeJSON(w, r, &req, maxAuthBodyBytes); err != nil {
@@ -217,7 +262,19 @@ func handleLoginStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	usernameNormalized := auth.NormalizeUsername(req.Username)
+	username := strings.TrimSpace(req.Username)
+
+	if err := validateUsername(username); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := validateOpaqueClientMessage(req.ClientMessage); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	usernameNormalized := auth.NormalizeUsername(username)
 
 	user, err := db.Q.GetUserByUsernameNormalized(r.Context(), usernameNormalized)
 	if err != nil {
@@ -231,7 +288,7 @@ func handleLoginStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	serverMessage, serverState, err := opaqueServer.LoginStart(user.OpaqueRegistrationRecord, clientMessage)
+	serverMessage, serverState, err := h.opaque.LoginStart(user.OpaqueRegistrationRecord, clientMessage)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
@@ -247,10 +304,10 @@ func handleLoginStart(w http.ResponseWriter, r *http.Request) {
 	_ = db.Q.DeletePendingLoginsByUserID(r.Context(), user.ID)
 
 	err = db.Q.CreatePendingLogin(r.Context(), db.CreatePendingLoginParams{
-		ID: 		 loginID,
-		UserID: 	 user.ID,
+		ID:          loginID,
+		UserID:      user.ID,
 		ServerState: serverState,
-		ExpiresAt: 	 time.Now().Add(10 * time.Minute),
+		ExpiresAt:   time.Now().Add(pendingAuthTTL),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save pending login")
@@ -258,17 +315,27 @@ func handleLoginStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, LoginStartResponse{
-		LoginID: 	   loginID,
+		LoginID:       loginID,
 		ServerMessage: base64.RawURLEncoding.EncodeToString(serverMessage),
 	})
 }
 
-// -- /api/login/finish
-func handleLoginFinish(w http.ResponseWriter, r *http.Request) {
+// -- /api/auth/login/finish
+func (h *Handler) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 	var req LoginFinishRequest
 
 	if err := decodeJSON(w, r, &req, maxAuthBodyBytes); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := validateFlowID(req.LoginID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := validateOpaqueClientMessage(req.ClientMessage); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -290,12 +357,10 @@ func handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := opaqueServer.LoginFinish(pending.ServerState, clientMessage); err != nil {
+	if err := h.opaque.LoginFinish(pending.ServerState, clientMessage); err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
-
-	accessTokenTTL := 15 * time.Minute
 
 	accessToken, err := auth.IssueAccessToken(pending.UserID, accessTokenTTL)
 	if err != nil {
@@ -312,7 +377,7 @@ func handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 }
 
 // -- /api/me
-func handleMe(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 	userID, err := requireAuth(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -326,12 +391,12 @@ func handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"id":	    user.ID,
+		"id":       user.ID,
 		"username": user.Username,
 	})
 }
 
-func handleSaveVault(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleSaveVault(w http.ResponseWriter, r *http.Request) {
 	userID, err := requireAuth(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -356,13 +421,12 @@ func handleSaveVault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// create new vault if expected revision is 0
+	// Create a new vault if expected revision is 0
 	if req.ExpectedRevision == 0 {
 		err = db.Q.CreateVault(r.Context(), db.CreateVaultParams{
 			UserID:        userID,
-			EncryptedBlob: string(encryptedBlobJSON),
+			EncryptedBlob: encryptedBlobJSON,
 		})
-
 		if err != nil {
 			writeError(w, http.StatusConflict, "vault already exists")
 			return
@@ -376,11 +440,10 @@ func handleSaveVault(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rowsAffected, err := db.Q.UpdateVaultIfRevisionMatches(r.Context(), db.UpdateVaultIfRevisionMatchesParams{
-		EncryptedBlob: string(encryptedBlobJSON),
+		EncryptedBlob: encryptedBlobJSON,
 		UserID:        userID,
 		Revision:      req.ExpectedRevision,
 	})
-
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save vault")
 		return
@@ -397,7 +460,7 @@ func handleSaveVault(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func handleGetVault(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleGetVault(w http.ResponseWriter, r *http.Request) {
 	userID, err := requireAuth(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -411,19 +474,14 @@ func handleGetVault(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var env vault.Envelope
-	if err := json.Unmarshal([]byte(vaultRecord.EncryptedBlob), &env); err != nil {
+	if err := json.Unmarshal(vaultRecord.EncryptedBlob, &env); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to unmarshal vault")
 		return
 	}
 
-	var updatedAtStr string
-    if vaultRecord.UpdatedAt.Valid {
-        updatedAtStr = vaultRecord.UpdatedAt.Time.Format(time.RFC3339)
-    }
-
 	writeJSON(w, http.StatusOK, map[string]any{
 		"encrypted_blob": env,
 		"revision":       vaultRecord.Revision,
-		"updated_at":     updatedAtStr,
+		"updated_at":     vaultRecord.UpdatedAt.Format(time.RFC3339),
 	})
 }

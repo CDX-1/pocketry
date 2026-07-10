@@ -17,6 +17,7 @@ require (
 	github.com/bytemare/opaque v0.18.0 // indirect
 	github.com/bytemare/secp256k1 v0.3.0 // indirect
 	github.com/gtank/ristretto255 v0.2.0 // indirect
+	github.com/joho/godotenv v1.5.1 // indirect
 	github.com/ncruces/go-sqlite3-wasm/v3 v3.1.35302 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	golang.org/x/sys v0.46.0 // indirect
