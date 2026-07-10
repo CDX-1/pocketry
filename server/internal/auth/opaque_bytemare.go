@@ -256,7 +256,7 @@ func (s *BytemareOpaqueServer) LoginFinish(serverState []byte, clientMessage []b
 	}
 
 	if err := server.LoginFinish(ke3, expectedClientMAC); err != nil {
-		return fmt.Errorf("finish OPAQUE login: %w")
+		return fmt.Errorf("finish OPAQUE login: %w", err)
 	}
 
 	return nil
