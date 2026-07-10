@@ -25,14 +25,14 @@ func main() {
 		log.Fatal(err)
 	}
 
-	var opaqueKeyMaterial []byte
-	if encoded := os.Getenv("POCKETRY_OPAQUE_KEY_MATERIAL"); encoded != "" {
-		decoded, err := base64.RawURLEncoding.DecodeString(encoded)
-		if err != nil {
-			log.Fatal(err)
-		}
+	encodedOpaqueKeyMaterial := os.Getenv("POCKETRY_OPAQUE_KEY_MATERIAL")
+	if encodedOpaqueKeyMaterial == "" {
+		log.Fatal("POCKETRY_OPAQUE_KEY_MATERIAL is required")
+	}
 
-		opaqueKeyMaterial = decoded
+	opaqueKeyMaterial, err := base64.RawURLEncoding.DecodeString(encodedOpaqueKeyMaterial)
+	if err != nil {
+		log.Fatalf("failed to decode POCKETRY_OPAQUE_KEY_MATERIAL: %v", err)
 	}
 
 	opaqueServer, err := auth.NewBytemareOpaqueServer("pocketry-server", opaqueKeyMaterial)
