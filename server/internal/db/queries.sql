@@ -79,7 +79,7 @@ WHERE id = ?;
 -- DeleteExpiredPendingRegistrations removes expired OPAQUE registration attempts.
 -- name: DeleteExpiredPendingRegistrations :exec
 DELETE FROM pending_registrations
-WHERE expires_at <= CURRENT_TIMESTAMP;
+WHERE expires_at <= ?;
 
 -- DeletePendingRegistrationsByUsernameNormalized removes older pending registration attempts for a username.
 -- name: DeletePendingRegistrationsByUsernameNormalized :exec
@@ -123,7 +123,7 @@ WHERE id = ?;
 -- DeleteExpiredPendingLogins removes expired OPAQUE login attempts.
 -- name: DeleteExpiredPendingLogins :exec
 DELETE FROM pending_logins
-WHERE expires_at <= CURRENT_TIMESTAMP;
+WHERE expires_at <= ?;
 
 -- DeletePendingLoginsByUserID removes older pending login attempts for a user.
 -- name: DeletePendingLoginsByUserID :exec

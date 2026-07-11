@@ -71,6 +71,11 @@ type VaultResponse struct {
 	UpdatedAt     string         `json:"updated_at"`
 }
 
+type MeResponse struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+}
+
 func RegisterRoutes(opaque auth.OpaqueServer) *http.ServeMux {
 	if opaque == nil {
 		panic("handlers: opaque server is nil")
@@ -167,7 +172,10 @@ func (h *Handler) handleRegisterStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := db.Q.DeleteExpiredPendingRegistrations(r.Context()); err != nil {
+	if err := db.Q.DeleteExpiredPendingRegistrations(
+		r.Context(),
+		time.Now().UTC(),
+	); err != nil {
 		log.Printf("delete expired pending registrations: %v", err)
 	}
 
@@ -176,7 +184,7 @@ func (h *Handler) handleRegisterStart(w http.ResponseWriter, r *http.Request) {
 		Username:           username,
 		UsernameNormalized: usernameNormalized,
 		ServerState:        serverState,
-		ExpiresAt:          time.Now().Add(pendingAuthTTL),
+		ExpiresAt:          time.Now().UTC().Add(pendingAuthTTL),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save pending registration")
@@ -308,7 +316,10 @@ func (h *Handler) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := db.Q.DeleteExpiredPendingLogins(r.Context()); err != nil {
+	if err := db.Q.DeleteExpiredPendingLogins(
+		r.Context(),
+		time.Now().UTC(),
+	); err != nil {
 		log.Printf("delete expired pending logins: %v", err)
 	}
 
@@ -316,7 +327,7 @@ func (h *Handler) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 		ID:          loginID,
 		UserID:      user.ID,
 		ServerState: serverState,
-		ExpiresAt:   time.Now().Add(pendingAuthTTL),
+		ExpiresAt:   time.Now().UTC().Add(pendingAuthTTL),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save pending login")
@@ -400,9 +411,9 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"id":       user.ID,
-		"username": user.Username,
+	writeJSON(w, http.StatusOK, MeResponse{
+		ID:       user.ID,
+		Username: user.Username,
 	})
 }
 

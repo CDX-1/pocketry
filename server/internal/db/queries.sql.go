@@ -158,23 +158,23 @@ func (q *Queries) CreateVault(ctx context.Context, arg CreateVaultParams) error 
 
 const deleteExpiredPendingLogins = `-- name: DeleteExpiredPendingLogins :exec
 DELETE FROM pending_logins
-WHERE expires_at <= CURRENT_TIMESTAMP
+WHERE expires_at <= ?
 `
 
 // DeleteExpiredPendingLogins removes expired OPAQUE login attempts.
-func (q *Queries) DeleteExpiredPendingLogins(ctx context.Context) error {
-	_, err := q.db.ExecContext(ctx, deleteExpiredPendingLogins)
+func (q *Queries) DeleteExpiredPendingLogins(ctx context.Context, expiresAt time.Time) error {
+	_, err := q.db.ExecContext(ctx, deleteExpiredPendingLogins, expiresAt)
 	return err
 }
 
 const deleteExpiredPendingRegistrations = `-- name: DeleteExpiredPendingRegistrations :exec
 DELETE FROM pending_registrations
-WHERE expires_at <= CURRENT_TIMESTAMP
+WHERE expires_at <= ?
 `
 
 // DeleteExpiredPendingRegistrations removes expired OPAQUE registration attempts.
-func (q *Queries) DeleteExpiredPendingRegistrations(ctx context.Context) error {
-	_, err := q.db.ExecContext(ctx, deleteExpiredPendingRegistrations)
+func (q *Queries) DeleteExpiredPendingRegistrations(ctx context.Context, expiresAt time.Time) error {
+	_, err := q.db.ExecContext(ctx, deleteExpiredPendingRegistrations, expiresAt)
 	return err
 }
 
