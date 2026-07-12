@@ -11,14 +11,14 @@ import (
 const defaultOpaqueServerIdentity = "pocketry-server"
 
 type BytemareOpaqueServer struct {
-	conf	 *bytemare.Configuration
+	conf     *bytemare.Configuration
 	serverID []byte
-	skm		 *bytemare.ServerKeyMaterial
+	skm      *bytemare.ServerKeyMaterial
 }
 
 type PendingOpaqueRegistrationState struct {
 	CredentialIdentifier string `json:"credential_identifier"`
-	ClientIdentity		 string `json:"client_identity"`
+	ClientIdentity       string `json:"client_identity"`
 }
 
 type PendingOpaqueLoginState struct {
@@ -26,9 +26,9 @@ type PendingOpaqueLoginState struct {
 }
 
 type StoredOpaqueRecord struct {
-	CredentialIdentifier   string `json:"credential_identifier"`
-	ClientIdentity	   string `json:"client_identity"`
-	RegistrationRecord string `json:"registration_record"`
+	CredentialIdentifier string `json:"credential_identifier"`
+	ClientIdentity       string `json:"client_identity"`
+	RegistrationRecord   string `json:"registration_record"`
 }
 
 func NewBytemareOpaqueServer(
@@ -66,10 +66,6 @@ func NewBytemareOpaqueServer(
 		serverID: []byte(serverIdentity),
 		skm:      skm,
 	}, nil
-}
-
-func (s *BytemareOpaqueServer) encodedServerKeyMaterial() []byte {
-	return s.skm.Encode()
 }
 
 func (s *BytemareOpaqueServer) newServer() (*bytemare.Server, error) {
@@ -181,6 +177,12 @@ func (s *BytemareOpaqueServer) LoginStart(storedRecord []byte, clientMessage []b
 	var stored StoredOpaqueRecord
 	if err := json.Unmarshal(storedRecord, &stored); err != nil {
 		return nil, nil, fmt.Errorf("decode stored OPAQUE record: %w", err)
+	}
+
+	if stored.CredentialIdentifier == "" ||
+		stored.ClientIdentity == "" ||
+		stored.RegistrationRecord == "" {
+		return nil, nil, fmt.Errorf("invalid stored OPAQUE record")
 	}
 
 	recordBytes, err := base64.RawURLEncoding.DecodeString(stored.RegistrationRecord)
