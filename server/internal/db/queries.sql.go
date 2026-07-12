@@ -7,158 +7,408 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"time"
 )
 
-const createSession = `-- name: CreateSession :exec
-INSERT INTO sessions (
-    user_id,
-    token_hash,
-    expires_at
-) VALUES (?, ?, ?)
+const consumePendingLogin = `-- name: ConsumePendingLogin :one
+DELETE FROM pending_logins
+WHERE id = ?
+RETURNING
+	user_id,
+	server_state,
+	expires_at
 `
 
-type CreateSessionParams struct {
-	UserID    int64
-	TokenHash string
-	ExpiresAt time.Time
+type ConsumePendingLoginRow struct {
+	UserID      int64
+	ServerState []byte
+	ExpiresAt   time.Time
 }
 
-// CreateSession creates a new active session for a user, mapping their user ID to a hashed session token with an expiration timestamp.
-func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) error {
-	_, err := q.db.ExecContext(ctx, createSession, arg.UserID, arg.TokenHash, arg.ExpiresAt)
+func (q *Queries) ConsumePendingLogin(ctx context.Context, id string) (ConsumePendingLoginRow, error) {
+	row := q.db.QueryRowContext(ctx, consumePendingLogin, id)
+	var i ConsumePendingLoginRow
+	err := row.Scan(&i.UserID, &i.ServerState, &i.ExpiresAt)
+	return i, err
+}
+
+const consumePendingRegistration = `-- name: ConsumePendingRegistration :one
+DELETE FROM pending_registrations
+WHERE id = ?
+RETURNING
+	username,
+	username_normalized,
+	server_state,
+	expires_at
+`
+
+type ConsumePendingRegistrationRow struct {
+	Username           string
+	UsernameNormalized string
+	ServerState        []byte
+	ExpiresAt          time.Time
+}
+
+func (q *Queries) ConsumePendingRegistration(ctx context.Context, id string) (ConsumePendingRegistrationRow, error) {
+	row := q.db.QueryRowContext(ctx, consumePendingRegistration, id)
+	var i ConsumePendingRegistrationRow
+	err := row.Scan(
+		&i.Username,
+		&i.UsernameNormalized,
+		&i.ServerState,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
+const createPendingLogin = `-- name: CreatePendingLogin :exec
+INSERT INTO pending_logins (
+	id,
+	user_id,
+	server_state,
+	expires_at
+) VALUES (?, ?, ?, ?)
+`
+
+type CreatePendingLoginParams struct {
+	ID          string
+	UserID      int64
+	ServerState []byte
+	ExpiresAt   time.Time
+}
+
+// CreatePendingLogin stores temporary OPAQUE login state.
+func (q *Queries) CreatePendingLogin(ctx context.Context, arg CreatePendingLoginParams) error {
+	_, err := q.db.ExecContext(ctx, createPendingLogin,
+		arg.ID,
+		arg.UserID,
+		arg.ServerState,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
+const createPendingRegistration = `-- name: CreatePendingRegistration :exec
+INSERT INTO pending_registrations (
+	id,
+	username,
+	username_normalized,
+	server_state,
+	expires_at
+) VALUES (?, ?, ?, ?, ?)
+`
+
+type CreatePendingRegistrationParams struct {
+	ID                 string
+	Username           string
+	UsernameNormalized string
+	ServerState        []byte
+	ExpiresAt          time.Time
+}
+
+// CreatePendingRegistration stores temporary OPAQUE registration state.
+func (q *Queries) CreatePendingRegistration(ctx context.Context, arg CreatePendingRegistrationParams) error {
+	_, err := q.db.ExecContext(ctx, createPendingRegistration,
+		arg.ID,
+		arg.Username,
+		arg.UsernameNormalized,
+		arg.ServerState,
+		arg.ExpiresAt,
+	)
 	return err
 }
 
 const createUser = `-- name: CreateUser :exec
 INSERT INTO users (
-    username, 
-    password_hash
-) VALUES (?, ?)
+	username,
+	username_normalized,
+	opaque_registration_record
+) VALUES (?, ?, ?)
 `
 
 type CreateUserParams struct {
-	Username     string
-	PasswordHash string
+	Username                 string
+	UsernameNormalized       string
+	OpaqueRegistrationRecord []byte
 }
 
-// CreateUser registers a new user in the system with a unique username and a hashed password.
+// CreateUser registers a new OPAQUE user after registration has been completed.
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) error {
-	_, err := q.db.ExecContext(ctx, createUser, arg.Username, arg.PasswordHash)
+	_, err := q.db.ExecContext(ctx, createUser, arg.Username, arg.UsernameNormalized, arg.OpaqueRegistrationRecord)
 	return err
 }
 
 const createVault = `-- name: CreateVault :exec
 INSERT INTO vaults (
-    user_id,
-    encrypted_blob
+	user_id,
+	encrypted_blob
 ) VALUES (?, ?)
 `
 
 type CreateVaultParams struct {
 	UserID        int64
-	EncryptedBlob string
+	EncryptedBlob []byte
 }
 
-// CreateVault initializes a new encrypted storage vault for a specific user.
+// CreateVault initializes a user's encrypted vault.
 func (q *Queries) CreateVault(ctx context.Context, arg CreateVaultParams) error {
 	_, err := q.db.ExecContext(ctx, createVault, arg.UserID, arg.EncryptedBlob)
 	return err
 }
 
-const deleteSessionByTokenHash = `-- name: DeleteSessionByTokenHash :exec
-DELETE FROM sessions
-WHERE token_hash = ?
+const deleteExpiredPendingLogins = `-- name: DeleteExpiredPendingLogins :exec
+DELETE FROM pending_logins
+WHERE expires_at <= ?
 `
 
-// DeleteSessionByTokenHash permanently removes a session by its token hash. Typically invoked during user logout.
-func (q *Queries) DeleteSessionByTokenHash(ctx context.Context, tokenHash string) error {
-	_, err := q.db.ExecContext(ctx, deleteSessionByTokenHash, tokenHash)
+// DeleteExpiredPendingLogins removes expired OPAQUE login attempts.
+func (q *Queries) DeleteExpiredPendingLogins(ctx context.Context, expiresAt time.Time) error {
+	_, err := q.db.ExecContext(ctx, deleteExpiredPendingLogins, expiresAt)
 	return err
 }
 
-const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
-SELECT user_id
-FROM sessions
-WHERE token_hash = ?
-AND expires_at > CURRENT_TIMESTAMP
+const deleteExpiredPendingRegistrations = `-- name: DeleteExpiredPendingRegistrations :exec
+DELETE FROM pending_registrations
+WHERE expires_at <= ?
+`
+
+// DeleteExpiredPendingRegistrations removes expired OPAQUE registration attempts.
+func (q *Queries) DeleteExpiredPendingRegistrations(ctx context.Context, expiresAt time.Time) error {
+	_, err := q.db.ExecContext(ctx, deleteExpiredPendingRegistrations, expiresAt)
+	return err
+}
+
+const deletePendingLogin = `-- name: DeletePendingLogin :exec
+DELETE FROM pending_logins
+WHERE id = ?
+`
+
+// DeletePendingLogin removes pending OPAQUE login state after completion or cancellation.
+func (q *Queries) DeletePendingLogin(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deletePendingLogin, id)
+	return err
+}
+
+const deletePendingLoginsByUserID = `-- name: DeletePendingLoginsByUserID :exec
+DELETE FROM pending_logins
+WHERE user_id = ?
+`
+
+// DeletePendingLoginsByUserID removes older pending login attempts for a user.
+func (q *Queries) DeletePendingLoginsByUserID(ctx context.Context, userID int64) error {
+	_, err := q.db.ExecContext(ctx, deletePendingLoginsByUserID, userID)
+	return err
+}
+
+const deletePendingRegistration = `-- name: DeletePendingRegistration :exec
+DELETE FROM pending_registrations
+WHERE id = ?
+`
+
+// DeletePendingRegistration removes pending OPAQUE registration state after completion or cancellation.
+func (q *Queries) DeletePendingRegistration(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, deletePendingRegistration, id)
+	return err
+}
+
+const deletePendingRegistrationsByUsernameNormalized = `-- name: DeletePendingRegistrationsByUsernameNormalized :exec
+DELETE FROM pending_registrations
+WHERE username_normalized = ?
+`
+
+// DeletePendingRegistrationsByUsernameNormalized removes older pending registration attempts for a username.
+func (q *Queries) DeletePendingRegistrationsByUsernameNormalized(ctx context.Context, usernameNormalized string) error {
+	_, err := q.db.ExecContext(ctx, deletePendingRegistrationsByUsernameNormalized, usernameNormalized)
+	return err
+}
+
+const getPendingLogin = `-- name: GetPendingLogin :one
+SELECT
+	id,
+	user_id,
+	server_state,
+	expires_at,
+	created_at
+FROM pending_logins
+WHERE id = ?
 LIMIT 1
 `
 
-// GetSessionByTokenHash retrieves the user ID associated with a session token, provided the session has not expired yet.
-func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash string) (int64, error) {
-	row := q.db.QueryRowContext(ctx, getSessionByTokenHash, tokenHash)
-	var user_id int64
-	err := row.Scan(&user_id)
-	return user_id, err
+// GetPendingLogin retrieves pending OPAQUE login state.
+func (q *Queries) GetPendingLogin(ctx context.Context, id string) (PendingLogin, error) {
+	row := q.db.QueryRowContext(ctx, getPendingLogin, id)
+	var i PendingLogin
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ServerState,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
-const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, password_hash
+const getPendingRegistration = `-- name: GetPendingRegistration :one
+SELECT
+	id,
+	username,
+	username_normalized,
+	server_state,
+	expires_at,
+	created_at
+FROM pending_registrations
+WHERE id = ?
+LIMIT 1
+`
+
+// GetPendingRegistration retrieves pending OPAQUE registration state.
+func (q *Queries) GetPendingRegistration(ctx context.Context, id string) (PendingRegistration, error) {
+	row := q.db.QueryRowContext(ctx, getPendingRegistration, id)
+	var i PendingRegistration
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.UsernameNormalized,
+		&i.ServerState,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getUserByID = `-- name: GetUserByID :one
+SELECT
+	id,
+	username,
+	username_normalized,
+	crypto_policy_version,
+	created_at,
+	updated_at
 FROM users
-WHERE username = ?
+WHERE id = ?
 LIMIT 1
 `
 
-type GetUserByUsernameRow struct {
-	ID           int64
-	Username     string
-	PasswordHash string
+type GetUserByIDRow struct {
+	ID                  int64
+	Username            string
+	UsernameNormalized  string
+	CryptoPolicyVersion int64
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
-// GetUserByUsername retrieves a user's ID, username, and password hash by their username.
-func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
-	row := q.db.QueryRowContext(ctx, getUserByUsername, username)
-	var i GetUserByUsernameRow
-	err := row.Scan(&i.ID, &i.Username, &i.PasswordHash)
+// GetUserByID retrieves a user by internal user ID.
+func (q *Queries) GetUserByID(ctx context.Context, id int64) (GetUserByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getUserByID, id)
+	var i GetUserByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.UsernameNormalized,
+		&i.CryptoPolicyVersion,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getUserByUsernameNormalized = `-- name: GetUserByUsernameNormalized :one
+SELECT
+	id,
+	username,
+	username_normalized,
+	opaque_registration_record,
+	crypto_policy_version,
+	created_at,
+	updated_at
+FROM users
+WHERE username_normalized = ?
+LIMIT 1
+`
+
+// GetUserByUsernameNormalized retrieves a user by normalized username for OPAQUE login.
+func (q *Queries) GetUserByUsernameNormalized(ctx context.Context, usernameNormalized string) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByUsernameNormalized, usernameNormalized)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.UsernameNormalized,
+		&i.OpaqueRegistrationRecord,
+		&i.CryptoPolicyVersion,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
 	return i, err
 }
 
 const getVaultByUserID = `-- name: GetVaultByUserID :one
-SELECT encrypted_blob, revision, updated_at
+SELECT
+	encrypted_blob,
+	revision,
+	created_at,
+	updated_at
 FROM vaults
 WHERE user_id = ?
 LIMIT 1
 `
 
 type GetVaultByUserIDRow struct {
-	EncryptedBlob string
+	EncryptedBlob []byte
 	Revision      int64
-	UpdatedAt     sql.NullTime
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
-// GetVaultByUserID fetches the encrypted data blob, current revision number, and last update timestamp for a user's vault.
+// GetVaultByUserID fetches the encrypted vault blob and revision for a user.
 func (q *Queries) GetVaultByUserID(ctx context.Context, userID int64) (GetVaultByUserIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getVaultByUserID, userID)
 	var i GetVaultByUserIDRow
-	err := row.Scan(&i.EncryptedBlob, &i.Revision, &i.UpdatedAt)
+	err := row.Scan(
+		&i.EncryptedBlob,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
 	return i, err
 }
 
 const updateVaultIfRevisionMatches = `-- name: UpdateVaultIfRevisionMatches :execrows
 UPDATE vaults
-SET 
-    encrypted_blob = ?,
-    revision = revision + 1,
-    updated_at = CURRENT_TIMESTAMP
+SET
+	encrypted_blob = ?,
+	revision = revision + 1,
+	updated_at = CURRENT_TIMESTAMP
 WHERE user_id = ?
 AND revision = ?
 `
 
 type UpdateVaultIfRevisionMatchesParams struct {
-	EncryptedBlob string
+	EncryptedBlob []byte
 	UserID        int64
 	Revision      int64
 }
 
-// UpdateVaultIfRevisionMatches implements optimistic concurrency control to update a user's vault.
-// It increments the vault revision and updates the blob only if the provided revision matches the current state in the database.
-// Returns the number of affected rows (0 means a conflict occurred and the update failed).
+// UpdateVaultIfRevisionMatches updates a vault only if the expected revision matches.
 func (q *Queries) UpdateVaultIfRevisionMatches(ctx context.Context, arg UpdateVaultIfRevisionMatchesParams) (int64, error) {
 	result, err := q.db.ExecContext(ctx, updateVaultIfRevisionMatches, arg.EncryptedBlob, arg.UserID, arg.Revision)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+const usernameExists = `-- name: UsernameExists :one
+SELECT COUNT(*) > 0 AS username_exists
+FROM users
+WHERE username_normalized = ?
+`
+
+// UsernameExists checks whether a normalized username is already registered.
+func (q *Queries) UsernameExists(ctx context.Context, usernameNormalized string) (bool, error) {
+	row := q.db.QueryRowContext(ctx, usernameExists, usernameNormalized)
+	var username_exists bool
+	err := row.Scan(&username_exists)
+	return username_exists, err
 }

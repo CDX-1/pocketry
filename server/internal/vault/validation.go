@@ -3,6 +3,7 @@ package vault
 import (
 	"encoding/base64"
 	"errors"
+	"strings"
 )
 
 const (
@@ -46,6 +47,10 @@ func ValidateEnvelope(env Envelope) error {
 func validateBase64URL(value string, field string) error {
 	if value == "" {
 		return errors.New(field + " is required")
+	}
+
+	if strings.ContainsAny(value, "\r\n\t ") {
+		return errors.New(field + " must be base64url encoded")
 	}
 
 	if _, err := base64.RawURLEncoding.DecodeString(value); err != nil {

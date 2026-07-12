@@ -1,8 +1,13 @@
 package handlers
 
 import (
+	"database/sql"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/CDX-1/pocketry/internal/auth"
@@ -10,9 +15,49 @@ import (
 	"github.com/CDX-1/pocketry/internal/vault"
 )
 
-type AuthRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+const (
+	pendingAuthTTL = 10 * time.Minute
+	accessTokenTTL = 15 * time.Minute
+)
+
+type Handler struct {
+	opaque auth.OpaqueServer
+}
+
+// request/response structs
+type RegisterStartRequest struct {
+	Username      string `json:"username"`
+	ClientMessage string `json:"client_message"`
+}
+
+type RegisterStartResponse struct {
+	RegistrationID string `json:"registration_id"`
+	ServerMessage  string `json:"server_message"`
+}
+
+type RegisterFinishRequest struct {
+	RegistrationID string `json:"registration_id"`
+	ClientMessage  string `json:"client_message"`
+}
+
+type LoginStartRequest struct {
+	Username      string `json:"username"`
+	ClientMessage string `json:"client_message"`
+}
+
+type LoginStartResponse struct {
+	LoginID       string `json:"login_id"`
+	ServerMessage string `json:"server_message"`
+}
+
+type LoginFinishRequest struct {
+	LoginID       string `json:"login_id"`
+	ClientMessage string `json:"client_message"`
+}
+
+type LoginFinishResponse struct {
+	AccessToken string `json:"access_token"`
+	ExpiresIn   int64  `json:"expires_in"`
 }
 
 type VaultRequest struct {
@@ -22,22 +67,41 @@ type VaultRequest struct {
 
 type VaultResponse struct {
 	EncryptedBlob vault.Envelope `json:"encrypted_blob"`
-	Revision      int64  		 `json:"revision"`
-	UpdatedAt     string 		 `json:"updated_at"`
+	Revision      int64          `json:"revision"`
+	UpdatedAt     string         `json:"updated_at"`
 }
 
-func RegisterRoutes() *http.ServeMux {
+type MeResponse struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+}
+
+func RegisterRoutes(opaque auth.OpaqueServer) *http.ServeMux {
+	if opaque == nil {
+		panic("handlers: opaque server is nil")
+	}
+
+	h := &Handler{
+		opaque: opaque,
+	}
+
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("POST /api/register", handleRegister)
-	mux.HandleFunc("POST /api/login", handleLogin)
-	mux.HandleFunc("POST /api/vault", handleSaveVault)
-	mux.HandleFunc("GET /api/vault", handleGetVault)
+	mux.HandleFunc("POST /api/auth/register/start", h.handleRegisterStart)
+	mux.HandleFunc("POST /api/auth/register/finish", h.handleRegisterFinish)
+
+	mux.HandleFunc("POST /api/auth/login/start", h.handleLoginStart)
+	mux.HandleFunc("POST /api/auth/login/finish", h.handleLoginFinish)
+
+	mux.HandleFunc("GET /api/me", h.handleMe)
+
+	mux.HandleFunc("POST /api/vault", h.handleSaveVault)
+	mux.HandleFunc("GET /api/vault", h.handleGetVault)
 
 	return mux
 }
 
-// checks if a session token is valid
+// checks if an access token is valid
 func requireAuth(r *http.Request) (int64, error) {
 	authHeader := r.Header.Get("Authorization")
 
@@ -46,99 +110,314 @@ func requireAuth(r *http.Request) (int64, error) {
 		return 0, err
 	}
 
-	tokenHash := auth.HashSessionToken(rawToken)
-
-	userID, err := db.Q.GetSessionByTokenHash(r.Context(), tokenHash)
+	claims, err := auth.VerifyAccessToken(rawToken)
 	if err != nil {
 		return 0, err
 	}
 
-	return userID, nil
+	return claims.UserID, nil
 }
 
-func handleRegister(w http.ResponseWriter, r *http.Request) {
-	var req AuthRequest
+// -- /api/auth/register/start
+func (h *Handler) handleRegisterStart(w http.ResponseWriter, r *http.Request) {
+	var req RegisterStartRequest
 
 	if err := decodeJSON(w, r, &req, maxAuthBodyBytes); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	if err := validateAuthRequest(&req); err != nil {
+	username := strings.TrimSpace(req.Username)
+	usernameNormalized := auth.NormalizeUsername(username)
+
+	if err := validateUsername(username); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	hashed, err := auth.HashPassword(req.Password)
+	if err := validateOpaqueClientMessage(req.ClientMessage); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	exists, err := db.Q.UsernameExists(r.Context(), usernameNormalized)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to hash password")
+		writeError(w, http.StatusInternalServerError, "failed to check username")
+		return
+	}
+
+	if exists {
+		writeError(w, http.StatusConflict, "username already exists")
+		return
+	}
+
+	clientMessage, err := base64.RawURLEncoding.DecodeString(req.ClientMessage)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid client message")
+		return
+	}
+
+	serverMessage, serverState, err := h.opaque.RegisterStart(
+		[]byte(usernameNormalized),
+		clientMessage,
+	)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to start registration")
+		return
+	}
+
+	registrationID, err := auth.NewFlowID()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create registration")
+		return
+	}
+
+	if err := db.Q.DeleteExpiredPendingRegistrations(
+		r.Context(),
+		time.Now().UTC(),
+	); err != nil {
+		log.Printf("delete expired pending registrations: %v", err)
+	}
+
+	err = db.Q.CreatePendingRegistration(r.Context(), db.CreatePendingRegistrationParams{
+		ID:                 registrationID,
+		Username:           username,
+		UsernameNormalized: usernameNormalized,
+		ServerState:        serverState,
+		ExpiresAt:          time.Now().UTC().Add(pendingAuthTTL),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save pending registration")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, RegisterStartResponse{
+		RegistrationID: registrationID,
+		ServerMessage:  base64.RawURLEncoding.EncodeToString(serverMessage),
+	})
+}
+
+// -- /api/auth/register/finish
+func (h *Handler) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
+	var req RegisterFinishRequest
+
+	if err := decodeJSON(w, r, &req, maxAuthBodyBytes); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := validateFlowID(req.RegistrationID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := validateOpaqueClientMessage(req.ClientMessage); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	clientMessage, err := base64.RawURLEncoding.DecodeString(req.ClientMessage)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid client message")
+		return
+	}
+
+	pending, err := db.Q.ConsumePendingRegistration(
+		r.Context(),
+		req.RegistrationID,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusBadRequest, "registration not found or expired")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to consume registration")
+		return
+	}
+
+	if time.Now().After(pending.ExpiresAt) {
+		writeError(w, http.StatusBadRequest, "registration expired")
+		return
+	}
+
+	registrationRecord, err := h.opaque.RegisterFinish(pending.ServerState, clientMessage)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to finish registration")
 		return
 	}
 
 	err = db.Q.CreateUser(r.Context(), db.CreateUserParams{
-		Username:     req.Username,
-		PasswordHash: hashed,
+		Username:                 pending.Username,
+		UsernameNormalized:       pending.UsernameNormalized,
+		OpaqueRegistrationRecord: registrationRecord,
 	})
 	if err != nil {
 		writeError(w, http.StatusConflict, "username already exists")
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, map[string]string{
-		"status": "registration successful",
+	user, err := db.Q.GetUserByUsernameNormalized(r.Context(), pending.UsernameNormalized)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load user")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"status":   "registration successful",
+		"user_id":  user.ID,
+		"username": user.Username,
 	})
 }
 
-func handleLogin(w http.ResponseWriter, r *http.Request) {
-	var req AuthRequest
+// -- /api/auth/login/start
+func (h *Handler) handleLoginStart(w http.ResponseWriter, r *http.Request) {
+	var req LoginStartRequest
 
 	if err := decodeJSON(w, r, &req, maxAuthBodyBytes); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	if err := validateAuthRequest(&req); err != nil {
+	username := strings.TrimSpace(req.Username)
+
+	if err := validateUsername(username); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	user, err := db.Q.GetUserByUsername(r.Context(), req.Username)
+	if err := validateOpaqueClientMessage(req.ClientMessage); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	usernameNormalized := auth.NormalizeUsername(username)
+
+	user, err := db.Q.GetUserByUsernameNormalized(r.Context(), usernameNormalized)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
-	match, err := auth.VerifyPassword(req.Password, user.PasswordHash)
-	if err != nil || !match {
+	clientMessage, err := base64.RawURLEncoding.DecodeString(req.ClientMessage)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid client message")
+		return
+	}
+
+	serverMessage, serverState, err := h.opaque.LoginStart(user.OpaqueRegistrationRecord, clientMessage)
+	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 
-	rawToken, err := auth.GenerateSessionToken()
+	loginID, err := auth.NewFlowID()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create session")
+		writeError(w, http.StatusInternalServerError, "failed to create login")
 		return
 	}
 
-	tokenHash := auth.HashSessionToken(rawToken)
+	if err := db.Q.DeleteExpiredPendingLogins(
+		r.Context(),
+		time.Now().UTC(),
+	); err != nil {
+		log.Printf("delete expired pending logins: %v", err)
+	}
 
-	err = db.Q.CreateSession(r.Context(), db.CreateSessionParams{
-		UserID:    user.ID,
-		TokenHash: tokenHash,
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+	err = db.Q.CreatePendingLogin(r.Context(), db.CreatePendingLoginParams{
+		ID:          loginID,
+		UserID:      user.ID,
+		ServerState: serverState,
+		ExpiresAt:   time.Now().UTC().Add(pendingAuthTTL),
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to save session")
+		writeError(w, http.StatusInternalServerError, "failed to save pending login")
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"message": "login successful",
-		"token":   rawToken,
+	writeJSON(w, http.StatusOK, LoginStartResponse{
+		LoginID:       loginID,
+		ServerMessage: base64.RawURLEncoding.EncodeToString(serverMessage),
 	})
 }
 
-func handleSaveVault(w http.ResponseWriter, r *http.Request) {
+// -- /api/auth/login/finish
+func (h *Handler) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
+	var req LoginFinishRequest
+
+	if err := decodeJSON(w, r, &req, maxAuthBodyBytes); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := validateFlowID(req.LoginID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	if err := validateOpaqueClientMessage(req.ClientMessage); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	clientMessage, err := base64.RawURLEncoding.DecodeString(req.ClientMessage)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid client message")
+		return
+	}
+
+	pending, err := db.Q.ConsumePendingLogin(r.Context(), req.LoginID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to consume login")
+		return
+	}
+
+	if time.Now().After(pending.ExpiresAt) {
+		writeError(w, http.StatusUnauthorized, "login expired")
+		return
+	}
+
+	if err := h.opaque.LoginFinish(pending.ServerState, clientMessage); err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
+
+	accessToken, err := auth.IssueAccessToken(pending.UserID, accessTokenTTL)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to issue access token")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, LoginFinishResponse{
+		AccessToken: accessToken,
+		ExpiresIn:   int64(accessTokenTTL.Seconds()),
+	})
+}
+
+// -- /api/me
+func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
+	userID, err := requireAuth(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	user, err := db.Q.GetUserByID(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, MeResponse{
+		ID:       user.ID,
+		Username: user.Username,
+	})
+}
+
+func (h *Handler) handleSaveVault(w http.ResponseWriter, r *http.Request) {
 	userID, err := requireAuth(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -163,13 +442,12 @@ func handleSaveVault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// create new vault if expected revision is 0
+	// Create a new vault if expected revision is 0
 	if req.ExpectedRevision == 0 {
 		err = db.Q.CreateVault(r.Context(), db.CreateVaultParams{
 			UserID:        userID,
-			EncryptedBlob: string(encryptedBlobJSON),
+			EncryptedBlob: encryptedBlobJSON,
 		})
-
 		if err != nil {
 			writeError(w, http.StatusConflict, "vault already exists")
 			return
@@ -183,11 +461,10 @@ func handleSaveVault(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rowsAffected, err := db.Q.UpdateVaultIfRevisionMatches(r.Context(), db.UpdateVaultIfRevisionMatchesParams{
-		EncryptedBlob: string(encryptedBlobJSON),
+		EncryptedBlob: encryptedBlobJSON,
 		UserID:        userID,
 		Revision:      req.ExpectedRevision,
 	})
-
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save vault")
 		return
@@ -204,7 +481,7 @@ func handleSaveVault(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func handleGetVault(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) handleGetVault(w http.ResponseWriter, r *http.Request) {
 	userID, err := requireAuth(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -218,19 +495,14 @@ func handleGetVault(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var env vault.Envelope
-	if err := json.Unmarshal([]byte(vaultRecord.EncryptedBlob), &env); err != nil {
+	if err := json.Unmarshal(vaultRecord.EncryptedBlob, &env); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to unmarshal vault")
 		return
 	}
 
-	var updatedAtStr string
-    if vaultRecord.UpdatedAt.Valid {
-        updatedAtStr = vaultRecord.UpdatedAt.Time.Format(time.RFC3339)
-    }
-
 	writeJSON(w, http.StatusOK, map[string]any{
 		"encrypted_blob": env,
 		"revision":       vaultRecord.Revision,
-		"updated_at":     updatedAtStr,
+		"updated_at":     vaultRecord.UpdatedAt.Format(time.RFC3339),
 	})
 }
