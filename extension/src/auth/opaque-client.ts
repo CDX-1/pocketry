@@ -1,29 +1,39 @@
-export interface OpaqueRegistrationSession {
-    readonly clientMessage: Uint8Array;
+export interface OpaqueRegistrationResult {
+    registrationRecord: string;
+    serverStaticPublicKey: string;
+}
 
-    finish(serverMessage: Uint8Array): Promise<Uint8Array>;
+export interface OpaqueLoginResult {
+    finishLoginRequest: string;
+    serverStaticPublicKey: string;
+}
+
+export interface OpaqueRegistrationSession {
+    readonly clientMessage: string;
+
+    finish(serverMessage: string): Promise<OpaqueRegistrationResult>;
 
     dispose(): void;
 }
 
 export interface OpaqueLoginSession {
-    readonly clientMessage: Uint8Array;
+    readonly clientMessage: string;
 
-    finish(serverMessage: Uint8Array): Promise<Uint8Array>;
+    finish(serverMessage: string): Promise<OpaqueLoginResult>;
 
     dispose(): void;
 }
 
 export interface OpaqueClient {
     startRegistration(
-        password: Uint8Array,
-        clientIdentity: Uint8Array,
-        serverIdentity: Uint8Array,
+        password: string,
+        clientIdentity: string,
+        serverIdentity: string,
     ): Promise<OpaqueRegistrationSession>;
 
     startLogin(
-        password: Uint8Array,
-        clientIdentity: Uint8Array,
-        serverIdentity: Uint8Array,
+        password: string,
+        clientIdentity: string,
+        serverIdentity: string,
     ): Promise<OpaqueLoginSession>;
 }

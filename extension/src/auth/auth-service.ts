@@ -1,13 +1,10 @@
-import { base64URLToBytes, bytesToBase64URL } from "../crypto/base64url";
 import type { LoginFinishResponse, LoginStartResponse, RegisterStartResponse } from "./auth-types";
 import type { OpaqueClient, OpaqueLoginSession, OpaqueRegistrationSession } from "./opaque-client";
-
-const textEncoder = new TextEncoder();
 
 export class AuthService {
     private readonly baseURL: string;
     private readonly opaqueClient: OpaqueClient;
-    private readonly serverIdentity: Uint8Array;
+    private readonly serverIdentity: string;
 
     constructor(options: {
         serverURL: string,
@@ -22,30 +19,25 @@ export class AuthService {
 
         this.baseURL = serverURL.replace(/\/+$/, "");
         this.opaqueClient = options.opaqueClient;
-        this.serverIdentity = textEncoder.encode(
-            options.serverIdentity ?? "pocketry-server"
-        );
+        this.serverIdentity = options.serverIdentity?.trim() || "pocketry-server";
     }
 
     async register(
         usernameInput: string,
-        passwordInput: string,
-    ): Promise<void> {
+        password: string,
+    ): Promise<{ serverStaticPublicKey: string }> {
         const username = this.normalizeUsername(usernameInput);
 
-        if (!passwordInput) {
+        if (!password) {
             throw new Error("password is required");
         }
-
-        const usernameBytes = textEncoder.encode(username);
-        const passwordBytes = textEncoder.encode(passwordInput);
 
         let session: OpaqueRegistrationSession | undefined;
 
         try {
             session = await this.opaqueClient.startRegistration(
-                passwordBytes,
-                usernameBytes,
+                password,
+                username,
                 this.serverIdentity,
             );
 
@@ -55,13 +47,13 @@ export class AuthService {
                     method: 'POST',
                     body: JSON.stringify({
                         username,
-                        client_message: bytesToBase64URL(session.clientMessage),
+                        client_message: session.clientMessage,
                     }),
                 }
             )
 
-            const registrationRecord = await session.finish(
-                base64URLToBytes(startRes.server_message),
+            const opaqueResult = await session.finish(
+                startRes.server_message,
             );
 
             await this.request(
@@ -70,35 +62,35 @@ export class AuthService {
                     method: "POST",
                     body: JSON.stringify({
                         registration_id: startRes.registration_id,
-                        client_message: bytesToBase64URL(registrationRecord),
+                        client_message: opaqueResult.registrationRecord,
                     })
                 }
             )
+
+            return {
+                serverStaticPublicKey: opaqueResult.serverStaticPublicKey,
+            }
         } finally {
-            passwordBytes.fill(0);
             session?.dispose();
         }
     }
 
     async login(
         usernameInput: string,
-        passwordInput: string,
-    ): Promise<LoginFinishResponse> {
+        password: string,
+    ): Promise<LoginFinishResponse & { serverStaticPublicKey: string }> {
         const username = this.normalizeUsername(usernameInput);
 
-        if (!passwordInput) {
+        if (!password) {
             throw new Error("password is required");
         }
-
-        const usernameBytes = textEncoder.encode(username);
-        const passwordBytes = textEncoder.encode(passwordInput);
 
         let session: OpaqueLoginSession | undefined;
 
         try {
             session = await this.opaqueClient.startLogin(
-                passwordBytes,
-                usernameBytes,
+                password,
+                username,
                 this.serverIdentity,
             );
 
@@ -108,34 +100,40 @@ export class AuthService {
                     method: "POST",
                     body: JSON.stringify({
                         username,
-                        client_message: bytesToBase64URL(session.clientMessage),
+                        client_message: session.clientMessage,
                     }),
                 }
             );
 
-            const ke3 = await session.finish(
-                base64URLToBytes(startRes.server_message),
-            );
+            const opaqueResult = await session.finish(startRes.server_message);
 
-            return await this.request<LoginFinishResponse>(
+            const response = await this.request<LoginFinishResponse>(
                 "api/auth/login/finish",
                 {
                     method: "POST",
                     body: JSON.stringify({
                         login_id: startRes.login_id,
-                        client_message: bytesToBase64URL(ke3),
+                        client_message: opaqueResult.finishLoginRequest,
                     }),
                 }
-            )
+            );
+
+            return {
+                ...response,
+                serverStaticPublicKey: opaqueResult.serverStaticPublicKey,
+            }
         } finally {
-            passwordBytes.fill(0);
             session?.dispose();
         }
     }
 
     async getCurrentUser(
         accessToken: string,
-    ): Promise<{ id: number, username: string }> {
+    ): Promise<{ id: number; username: string }> {
+        if (!accessToken.trim()) {
+            throw new Error("access token is required");
+        }
+
         return this.request("api/me", {
             method: "GET",
             headers: {
@@ -149,6 +147,12 @@ export class AuthService {
 
         if (!normalized) {
             throw new Error("username is required");
+        }
+
+        if (!/^[a-z0-9]{3,24}$/.test(normalized)) {
+            throw new Error(
+                "username must be between 3 and 24 alphanumeric characters",
+            );
         }
 
         return normalized;
@@ -169,9 +173,17 @@ export class AuthService {
             },
         );
 
-        const body: unknown = await response
-            .json()
-            .catch(() => null);
+        const responseText = await response.text();
+
+        let body: unknown = null;
+
+        if (responseText) {
+            try {
+                body = JSON.parse(responseText);
+            } catch {
+                body = responseText;
+            }
+        }
 
         if (!response.ok) {
             throw new Error(
@@ -193,6 +205,10 @@ export class AuthService {
             typeof body.error === "string"
         ) {
             return body.error;
+        }
+
+        if (typeof body === "string" && body.trim()) {
+            return body;
         }
 
         return `request failed with status ${status}`;
