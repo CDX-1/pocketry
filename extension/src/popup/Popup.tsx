@@ -4,6 +4,7 @@ import LaunchScreen from "./screens/LaunchScreen";
 import AddServerScreen from "./screens/AddServerScreen";
 import DashboardScreen from "./screens/DashboardScreen";
 import Footer from "../components/footer";
+import ServerLoginScreen from "./screens/server/ServerLoginScreen";
 
 function Popup() {
     return (
@@ -14,6 +15,7 @@ function Popup() {
                         <Header />
                         <Routes>
                             <Route path="/" element={<LaunchScreen />} />
+                            <Route path="/login" element={<ServerLoginScreen />} />
                             <Route path="/add-server" element={<AddServerScreen />} />
                             <Route path="/dashboard" element={<DashboardScreen />} />
                         </Routes>
