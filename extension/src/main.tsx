@@ -5,11 +5,14 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import Popup from "./popup/Popup";
 import { ServersProvider } from "./components/context/servers-provider";
+import { AuthProvider } from "./components/context/auth-provider";
 
 createRoot(document.getElementById("root")!).render(
     <StrictMode>
         <ServersProvider>
-            <Popup />
+            <AuthProvider>
+                <Popup />
+            </AuthProvider>
         </ServersProvider>
     </StrictMode>,
 );

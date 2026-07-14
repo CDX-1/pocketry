@@ -2,6 +2,8 @@ export type StoredServer = {
     id: string;
     name: string;
     url: string;
+    username?: string;
+    serverStaticPublicKey?: string;
 };
 
 type StorageSchema = {
@@ -97,4 +99,22 @@ export async function getSelectedServerId(): Promise<string> {
 
 export async function saveSelectedServerId(serverId: string): Promise<void> {
     await setStorage({ selectedServerId: serverId });
+}
+
+export async function updateServer(
+    serverId: string,
+    updates: Partial<Omit<StoredServer, "id">>,
+): Promise<void> {
+    const servers = await getServers();
+
+    const updatedServers = servers.map((server) =>
+        server.id === serverId
+            ? {
+                ...server,
+                ...updates,
+            }
+            : server,
+    );
+
+    await saveServers(updatedServers);
 }
