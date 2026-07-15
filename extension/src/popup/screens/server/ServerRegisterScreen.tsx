@@ -11,11 +11,11 @@ import {
 import { Input } from "../../../components/ui/input";
 import { useAuth } from "../../../components/context/auth-provider";
 import { Link, useNavigate } from "react-router-dom";
-import { AlertCircleIcon } from "lucide-react";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../../../components/ui/alert";
+import { AlertCircleIcon } from "lucide-react";
 
-function ServerLoginScreen() {
-    const { login } = useAuth();
+function ServerRegisterScreen() {
+    const { register } = useAuth();
     const navigate = useNavigate();
 
     const [error, setError] = useState("");
@@ -28,13 +28,13 @@ function ServerLoginScreen() {
 
         setError("");
         setIsSubmitting(true);
-        
+
         try {
-            await login(username, password);
+            await register(username, password);
 
             setPassword("");
 
-            navigate("/dashboard", {
+            navigate("/login", {
                 replace: true,
             });
         } catch (error) {
@@ -56,7 +56,7 @@ function ServerLoginScreen() {
                         className="pointer-events-auto w-full shadow-sm"
                     >
                         <AlertCircleIcon />
-                        <AlertTitle>Login failed</AlertTitle>
+                        <AlertTitle>Registration failed</AlertTitle>
                         <AlertDescription>
                             {error}
                         </AlertDescription>
@@ -74,12 +74,11 @@ function ServerLoginScreen() {
                 </div>
             )}
 
-
             <FieldSet>
-                <FieldLegend>Log in to your account</FieldLegend>
+                <FieldLegend>Register an account</FieldLegend>
 
                 <FieldDescription>
-                    Log in to this Pocketry server.
+                    Create an account on this Pocketry server.
                 </FieldDescription>
 
                 <FieldGroup>
@@ -118,14 +117,14 @@ function ServerLoginScreen() {
                     </Field>
 
                     <p className="text-center text-sm">
-                        Don't have an account?{" "}
-                        <Link to="/register" className="underline text-primary-primary">
-                            Register an account.
+                        Already have an account?{" "}
+                        <Link to="/login" className="underline text-primary-primary">
+                            Log in to your account.
                         </Link>
                     </p>
 
                     <Button size="lg" type="submit" disabled={isSubmitting}>
-                        {isSubmitting ? "Logging in..." : "Login"}
+                        {isSubmitting ? "Creating account..." : "Create account"}
                     </Button>
                 </FieldGroup>
             </FieldSet>
@@ -133,4 +132,4 @@ function ServerLoginScreen() {
     );
 }
 
-export default ServerLoginScreen;
+export default ServerRegisterScreen;

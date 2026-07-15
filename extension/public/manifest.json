@@ -8,5 +8,8 @@
         "default_title": "Pocketry"
     },
     "permissions": ["storage", "tabs", "activeTab"],
-    "host_permissions": ["http://localhost:5173/*"]
+    "host_permissions": ["http://localhost:5173/*"],
+    "content_security_policy": {
+        "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+    }
 }

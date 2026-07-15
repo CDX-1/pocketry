@@ -17,7 +17,7 @@ export class AuthService {
             throw new Error("server URL is required");
         }
 
-        this.baseURL = serverURL.replace(/\/+$/, "");
+        this.baseURL = this.normalizeServerURL(serverURL);
         this.opaqueClient = options.opaqueClient;
         this.serverIdentity = options.serverIdentity?.trim() || "pocketry-server";
     }
@@ -156,6 +156,25 @@ export class AuthService {
         }
 
         return normalized;
+    }
+
+    private normalizeServerURL(urlInput: string): string {
+        let normalized = urlInput.trim();
+
+        if (!normalized) {
+            throw new Error("Server URL is required");
+        }
+
+        if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+            normalized = `http://${normalized}`;
+        }
+
+        const url = new URL(normalized);
+        if (url.protocol !== "http:" && url.protocol !== "https:") {
+            throw new Error("server URL must use http or https");
+        }
+
+        return url.toString().replace(/\/+$/, "");
     }
 
     private async request<T = void>(
