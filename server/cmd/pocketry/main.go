@@ -5,12 +5,29 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/CDX-1/pocketry/internal/auth"
 	"github.com/CDX-1/pocketry/internal/db"
 	"github.com/CDX-1/pocketry/internal/handlers"
+	"github.com/CDX-1/pocketry/internal/middleware"
 	"github.com/joho/godotenv"
 )
+
+func parseAllowedOrigins(value string) []string {
+	parts := strings.Split(value, ",")
+	origins := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		origin := strings.TrimSpace(part)
+
+		if origin != "" {
+			origins = append(origins, origin)
+		}
+	}
+
+	return origins
+}
 
 func main() {
 	_ = godotenv.Load()
@@ -41,10 +58,22 @@ func main() {
 	}
 
 	mux := handlers.RegisterRoutes(opaqueServer)
+	allowedOrigins := parseAllowedOrigins(os.Getenv("POCKETRY_ALLOWED_ORIGINS"))
+	allowFirefoxExtensions := strings.EqualFold(
+		strings.TrimSpace(os.Getenv("POCKETRY_ALLOW_FIREFOX_EXTENSIONS")),
+		"true",
+	)
+
+	if len(allowedOrigins) == 0 && !allowFirefoxExtensions {
+		log.Fatal("POCKETRY_ALLOWED_ORIGINS is required unless Firefox extension origins are enabled")
+	}
+
+	cors := middleware.NewCORS(allowedOrigins, allowFirefoxExtensions)
+	handler := cors.Handler(mux)
 
 	log.Println("Pocketry server running on http://localhost:8080")
 
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	if err := http.ListenAndServe(":8080", handler); err != nil {
 		log.Fatal(err)
 	}
 }
