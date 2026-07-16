@@ -3,6 +3,7 @@ import { clearServerSession, getServerSession, saveServerSession, type StoredSes
 import { useServers } from "./servers-provider";
 import { AuthService } from "../../auth/auth-service";
 import { SerenityOpaqueClient } from "../../auth/serenity-opaque-client";
+import { useNotifications } from "./notification-provider";
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
@@ -27,6 +28,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
     const { selectedServer, updateServer } = useServers();
+    const { notify } = useNotifications();
 
     const [status, setStatus] = useState<AuthStatus>("loading");
     const [session, setSession] = useState<StoredSession>();
@@ -45,6 +47,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [selectedServer]);
 
     const refreshSession = useCallback(async () => {
+        setStatus("loading");
+
         if (!selectedServer) {
             setSession(undefined);
             setCurrentUser(undefined);
@@ -52,21 +56,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             return;
         }
 
-        const storedSession = await getServerSession(selectedServer.id);
-
-        if (!storedSession) {
-            setSession(undefined);
-            setCurrentUser(undefined);
-            setStatus("unauthenticated");
-            return;
-        }
-
         try {
-            const authService = createAuthService();
+            const storedSession = await getServerSession(selectedServer.id);
 
-            const user = await authService.getCurrentUser(
-                storedSession.accessToken,
-            );
+            if (!storedSession) {
+                setSession(undefined);
+                setCurrentUser(undefined);
+                setStatus("unauthenticated");
+                return;
+            }
+
+            const authService = createAuthService();
+            const user = await authService.getCurrentUser(storedSession.accessToken);
 
             setSession(storedSession);
             setCurrentUser(user);
@@ -79,10 +80,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setStatus("unauthenticated");
         }
     }, [selectedServer, createAuthService]);
-
-    useEffect(() => {
-        void refreshSession();
-    }, [refreshSession]);
 
     const register = useCallback(async (username: string, password: string) => {
         if (!selectedServer) {
@@ -132,7 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setStatus("authenticated");
     }, [selectedServer, createAuthService, updateServer]);
 
-    const logout = useCallback(async () => {
+    const clearAuthentication = useCallback(async () => {
         if (selectedServer) {
             await clearServerSession(selectedServer.id);
         }
@@ -141,6 +138,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setCurrentUser(undefined);
         setStatus("unauthenticated");
     }, [selectedServer]);
+
+    const logout = useCallback(async () => {
+        await clearAuthentication();
+    }, [clearAuthentication]);
+
+    const expireSession = useCallback(async () => {
+        await clearAuthentication();
+
+        notify({
+            title: "Session expired",
+            description: "Your login has expired. Please log in again.",
+            variant: "destructive",
+            ttl: 0,
+        });
+    }, [clearAuthentication, notify]);
+
+    useEffect(() => {
+        void refreshSession();
+    }, [refreshSession]);
+
+    useEffect(() => {
+        if (status !== "authenticated" || !session) return;
+
+        const remainingTime = session.expiresAt - Date.now();
+        if (remainingTime <= 0) {
+            void expireSession();
+            return;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            void expireSession();
+        }, remainingTime);
+
+        return () => {
+            window.clearTimeout(timeoutId);
+        }
+    }, [status, session, expireSession]);
 
     const value = useMemo<AuthContextValue>(
         () => ({

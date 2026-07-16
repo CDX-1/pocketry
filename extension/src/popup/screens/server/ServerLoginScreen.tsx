@@ -11,14 +11,13 @@ import {
 import { Input } from "../../../components/ui/input";
 import { useAuth } from "../../../components/context/auth-provider";
 import { Link, useNavigate } from "react-router-dom";
-import { AlertCircleIcon } from "lucide-react";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "../../../components/ui/alert";
+import { useNotifications } from "../../../components/context/notification-provider";
 
 function ServerLoginScreen() {
     const { login } = useAuth();
+    const { notify } = useNotifications();
     const navigate = useNavigate();
 
-    const [error, setError] = useState("");
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -26,9 +25,8 @@ function ServerLoginScreen() {
     async function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
 
-        setError("");
         setIsSubmitting(true);
-        
+
         try {
             await login(username, password);
 
@@ -38,10 +36,12 @@ function ServerLoginScreen() {
                 replace: true,
             });
         } catch (error) {
-            setError(error instanceof Error
-                ? error.message
-                : "Registration failed",
-            );
+            notify({
+                title: "Login failed",
+                description: error instanceof Error ? error.message : "Login failed",
+                variant: "destructive",
+                ttl: 0,
+            });
         } finally {
             setIsSubmitting(false);
         }
@@ -49,32 +49,6 @@ function ServerLoginScreen() {
 
     return (
         <form className="flex h-full flex-col justify-end pb-8 relative" onSubmit={handleSubmit}>
-            {error && (
-                <div className="pointer-events-none absolute inset-x-0 top-2 z-50">
-                    <Alert
-                        variant="destructive"
-                        className="pointer-events-auto w-full shadow-sm"
-                    >
-                        <AlertCircleIcon />
-                        <AlertTitle>Login failed</AlertTitle>
-                        <AlertDescription>
-                            {error}
-                        </AlertDescription>
-                        <AlertAction>
-                            <Button
-                                type="button"
-                                size="xs"
-                                variant="destructive"
-                                onClick={() => setError("")}
-                            >
-                                Close
-                            </Button>
-                        </AlertAction>
-                    </Alert>
-                </div>
-            )}
-
-
             <FieldSet>
                 <FieldLegend>Log in to your account</FieldLegend>
 

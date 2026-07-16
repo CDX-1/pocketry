@@ -11,14 +11,13 @@ import {
 import { Input } from "../../../components/ui/input";
 import { useAuth } from "../../../components/context/auth-provider";
 import { Link, useNavigate } from "react-router-dom";
-import { Alert, AlertAction, AlertDescription, AlertTitle } from "../../../components/ui/alert";
-import { AlertCircleIcon } from "lucide-react";
+import { useNotifications } from "../../../components/context/notification-provider";
 
 function ServerRegisterScreen() {
     const { register } = useAuth();
+    const { notify } = useNotifications();
     const navigate = useNavigate();
 
-    const [error, setError] = useState("");
     const [username, setUsername] = useState("");
     const [password, setPassword] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -26,7 +25,6 @@ function ServerRegisterScreen() {
     async function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
 
-        setError("");
         setIsSubmitting(true);
 
         try {
@@ -34,14 +32,22 @@ function ServerRegisterScreen() {
 
             setPassword("");
 
+            notify({
+                title: "Registration success",
+                description: "Account created successfully. Please log in.",
+                variant: "default",
+            });
+
             navigate("/login", {
                 replace: true,
             });
         } catch (error) {
-            setError(error instanceof Error
-                ? error.message
-                : "Registration failed",
-            );
+            notify({
+                title: "Registration failed",
+                description: error instanceof Error ? error.message : "Registration failed",
+                variant: "destructive",
+                ttl: 0,
+            });
         } finally {
             setIsSubmitting(false);
         }
@@ -49,31 +55,6 @@ function ServerRegisterScreen() {
 
     return (
         <form className="flex h-full flex-col justify-end pb-8 relative" onSubmit={handleSubmit}>
-            {error && (
-                <div className="pointer-events-none absolute inset-x-0 top-2 z-50">
-                    <Alert
-                        variant="destructive"
-                        className="pointer-events-auto w-full shadow-sm"
-                    >
-                        <AlertCircleIcon />
-                        <AlertTitle>Registration failed</AlertTitle>
-                        <AlertDescription>
-                            {error}
-                        </AlertDescription>
-                        <AlertAction>
-                            <Button
-                                type="button"
-                                size="xs"
-                                variant="destructive"
-                                onClick={() => setError("")}
-                            >
-                                Close
-                            </Button>
-                        </AlertAction>
-                    </Alert>
-                </div>
-            )}
-
             <FieldSet>
                 <FieldLegend>Register an account</FieldLegend>
 
