@@ -148,7 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         notify({
             title: "Session expired",
-            description: "Your login has expired. Please log in again.",
+            description: "Your session has expired. Please log in again.",
             variant: "destructive",
             ttl: 0,
         });
