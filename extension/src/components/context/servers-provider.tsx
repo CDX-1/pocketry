@@ -24,7 +24,7 @@ type ServersContextValue = {
     addServer: (server: Omit<StoredServer, "id">) => Promise<StoredServer>;
     updateServer: (
         serverId: string,
-        updates: { name: string; url: string }
+        updates: Partial<Omit<StoredServer, "id">>,
     ) => Promise<void>;
     deleteServer: (serverId: string) => Promise<void>;
     selectServer: (serverId: string) => Promise<void>;
@@ -97,23 +97,24 @@ export function ServersProvider({ children }: { children: ReactNode }) {
     );
 
     const updateServer = useCallback(
-        async (serverId: string, updates: { name: string; url: string }) => {
+        async (
+            serverId: string,
+            updates: Partial<Omit<StoredServer, "id">>,
+        ) => {
             const nextServers = servers.map((server) =>
                 server.id === serverId
                     ? {
                         ...server,
-                        name: updates.name,
-                        url: updates.url,
+                        ...updates,
                     }
-                    : server
+                    : server,
             );
 
             setServers(nextServers);
             await saveServers(nextServers);
         },
-        [servers]
+        [servers],
     );
-
     const deleteServer = useCallback(
         async (serverId: string) => {
             const nextServers = servers.filter((server) => server.id !== serverId);
