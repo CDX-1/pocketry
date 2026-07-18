@@ -7,47 +7,45 @@ import (
 	"testing"
 )
 
-func setupTestDB(t *testing.T) {
+func setupTestDB(t *testing.T) *Store {
 	t.Helper()
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
-	if err := InitDB(dbPath); err != nil {
-		t.Fatalf("InitDB returned error: %v", err)
+	store, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("Open returned err: %v", err)
 	}
 
 	t.Cleanup(func() {
-		if DB != nil {
-			if err := DB.Close(); err != nil {
-				t.Errorf("close test database: %v", err)
-			}
+		if err := store.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
 		}
-
-		DB = nil
-		Q = nil
 	})
+
+	return store
 }
 
 // tests database & query initialization & pinging
-func TestInitDBInitializeDatabaseAndQueries(t *testing.T) {
-	setupTestDB(t)
+func TestOpenInitializesDatabaseAndQueries(t *testing.T) {
+	store := setupTestDB(t)
 
-	if DB == nil {
+	if store.DB == nil {
 		t.Fatal("expected DB to be initialized")
 	}
 
-	if Q == nil {
+	if store.Q == nil {
 		t.Fatal("expected Q to be initialized")
 	}
 
-	if err := DB.PingContext(t.Context()); err != nil {
+	if err := store.DB.PingContext(t.Context()); err != nil {
 		t.Fatalf("database ping failed: %v", err)
 	}
 }
 
 // ensures database creates all tables
-func TestInitDBCreatesExpectedTables(t *testing.T) {
-	setupTestDB(t)
+func TestOpenCreatesExpectedTables(t *testing.T) {
+	store := setupTestDB(t)
 
 	expectedTables := []string{
 		"users",
@@ -60,7 +58,7 @@ func TestInitDBCreatesExpectedTables(t *testing.T) {
 		t.Run(tableName, func(t *testing.T) {
 			var actualName string
 
-			err := DB.QueryRowContext(
+			err := store.DB.QueryRowContext(
 				t.Context(),
 				`
 					SELECT name
@@ -70,7 +68,6 @@ func TestInitDBCreatesExpectedTables(t *testing.T) {
 				`,
 				tableName,
 			).Scan(&actualName)
-
 			if err != nil {
 				t.Fatalf(
 					"expected table %q to exist: %v",
@@ -91,12 +88,12 @@ func TestInitDBCreatesExpectedTables(t *testing.T) {
 }
 
 // ensures database has foreign keys enabled
-func TestInitDBEnablesForeignKeys(t *testing.T) {
-	setupTestDB(t)
+func TestOpenEnablesForeignKeys(t *testing.T) {
+	store := setupTestDB(t)
 
 	var enabled int
 
-	if err := DB.QueryRowContext(
+	if err := store.DB.QueryRowContext(
 		t.Context(),
 		"PRAGMA foreign_keys;",
 	).Scan(&enabled); err != nil {
@@ -108,13 +105,15 @@ func TestInitDBEnablesForeignKeys(t *testing.T) {
 	}
 }
 
+
 // ensures database has WAL mode enabled
-func TestInitDBEnablesWALMode(t *testing.T) {
-	setupTestDB(t)
+
+func TestOpenEnablesWALMode(t *testing.T) {
+	store := setupTestDB(t)
 
 	var journalMode string
 
-	if err := DB.QueryRowContext(
+	if err := store.DB.QueryRowContext(
 		t.Context(),
 		"PRAGMA journal_mode;",
 	).Scan(&journalMode); err != nil {
@@ -127,12 +126,12 @@ func TestInitDBEnablesWALMode(t *testing.T) {
 }
 
 // ensures database set busy timeout correctly
-func TestInitDBSetsBusyTimeout(t *testing.T) {
-	setupTestDB(t)
+func TestOpenSetsBusyTimeout(t *testing.T) {
+	store := setupTestDB(t)
 
 	var timeout int
 
-	if err := DB.QueryRowContext(
+	if err := store.DB.QueryRowContext(
 		t.Context(),
 		"PRAGMA busy_timeout;",
 	).Scan(&timeout); err != nil {
@@ -146,11 +145,11 @@ func TestInitDBSetsBusyTimeout(t *testing.T) {
 
 // verifies that the database can create and retrieve users using normalized usernames
 func TestCreateAndGetUserByNormalizedUsername(t *testing.T) {
-	setupTestDB(t)
+	store := setupTestDB(t)
 
 	registrationRecord := []byte("opaque-registration-record")
 
-	err := Q.CreateUser(
+	err := store.Q.CreateUser(
 		t.Context(),
 		CreateUserParams{
 			Username:               "Username",
@@ -162,7 +161,7 @@ func TestCreateAndGetUserByNormalizedUsername(t *testing.T) {
 		t.Fatalf("CreateUser returned error: %v", err)
 	}
 
-	user, err := Q.GetUserByUsernameNormalized(
+	user, err := store.Q.GetUserByUsernameNormalized(
 		t.Context(),
 		"username",
 	)
@@ -222,9 +221,9 @@ func TestCreateAndGetUserByNormalizedUsername(t *testing.T) {
 
 // verifies that the database can retrieve users by ID after creation
 func TestGetUserByID(t *testing.T) {
-	setupTestDB(t)
+	store := setupTestDB(t)
 
-	err := Q.CreateUser(
+	err := store.Q.CreateUser(
 		t.Context(),
 		CreateUserParams{
 			Username: 				  "Username",
@@ -236,7 +235,7 @@ func TestGetUserByID(t *testing.T) {
 		t.Fatalf("CreateUser returned error: %v", err)
 	}
 
-	createdUser, err := Q.GetUserByUsernameNormalized(
+	createdUser, err := store.Q.GetUserByUsernameNormalized(
 		t.Context(),
 		"username",
 	)
@@ -247,7 +246,7 @@ func TestGetUserByID(t *testing.T) {
 		)
 	}
 
-	user, err := Q.GetUserByID(
+	user, err := store.Q.GetUserByID(
 		t.Context(),
 		createdUser.ID,
 	)
@@ -274,9 +273,9 @@ func TestGetUserByID(t *testing.T) {
 
 // verifies that the database can check for username existence
 func TestUsernameExists(t *testing.T) {
-	setupTestDB(t)
+	store := setupTestDB(t)
 
-	exists, err := Q.UsernameExists(
+	exists, err := store.Q.UsernameExists(
 		t.Context(),
 		"username",
 	)
@@ -288,7 +287,7 @@ func TestUsernameExists(t *testing.T) {
 		t.Fatal("expected username not to exist before creation")
 	}
 
-	err = Q.CreateUser(
+	err = store.Q.CreateUser(
 		t.Context(),
 		CreateUserParams{
 			Username:                 "Username",
@@ -300,7 +299,7 @@ func TestUsernameExists(t *testing.T) {
 		t.Fatalf("CreateUser returned error: %v", err)
 	}
 
-	exists, err = Q.UsernameExists(
+	exists, err = store.Q.UsernameExists(
 		t.Context(),
 		"username",
 	)
@@ -315,7 +314,7 @@ func TestUsernameExists(t *testing.T) {
 
 // verifies that the database rejects duplicate normalized usernames
 func TestCreateUserRejectsDuplicateNormalizedUsername(t *testing.T) {
-	setupTestDB(t)
+	store := setupTestDB(t)
 
 	first := CreateUserParams{
 		Username:                 "Username",
@@ -323,7 +322,7 @@ func TestCreateUserRejectsDuplicateNormalizedUsername(t *testing.T) {
 		OpaqueRegistrationRecord: []byte("first-record"),
 	}
 
-	if err := Q.CreateUser(t.Context(), first); err != nil {
+	if err := store.Q.CreateUser(t.Context(), first); err != nil {
 		t.Fatalf("first CreateUser returned error: %v", err)
 	}
 
@@ -333,7 +332,7 @@ func TestCreateUserRejectsDuplicateNormalizedUsername(t *testing.T) {
 		OpaqueRegistrationRecord: []byte("second-record"),
 	}
 
-	err := Q.CreateUser(t.Context(), second)
+	err := store.Q.CreateUser(t.Context(), second)
 	if err == nil {
 		t.Fatal("expected duplicate normalized username error")
 	}
@@ -341,9 +340,9 @@ func TestCreateUserRejectsDuplicateNormalizedUsername(t *testing.T) {
 
 // verifies that the database returns sql.ErrNoRows for missing users
 func TestGetMissingUserReturnsNoRows(t *testing.T) {
-	setupTestDB(t)
+	store := setupTestDB(t)
 
-	_, err := Q.GetUserByUsernameNormalized(
+	_, err := store.Q.GetUserByUsernameNormalized(
 		t.Context(),
 		"missinguser",
 	)
