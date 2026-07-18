@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/bytemare/opaque"
 	bytemare "github.com/bytemare/opaque"
 )
 
-const defaultOpaqueServerIdentity = "pocketry-server"
+const DefaultOpaqueServerIdentity = "pocketry-server"
 
 type BytemareOpaqueServer struct {
 	conf     *bytemare.Configuration
@@ -38,7 +39,7 @@ func NewBytemareOpaqueServer(
 	conf := bytemare.DefaultConfiguration()
 
 	if serverIdentity == "" {
-		serverIdentity = defaultOpaqueServerIdentity
+		serverIdentity = DefaultOpaqueServerIdentity
 	}
 
 	if len(serializedServerKeyMaterial) == 0 {
@@ -262,4 +263,28 @@ func (s *BytemareOpaqueServer) LoginFinish(serverState []byte, clientMessage []b
 	}
 
 	return nil
+}
+
+func GenerateOpaqueServerKeyMaterial(serverIdentity string) ([]byte, error) {
+	if serverIdentity == "" {
+		return nil, fmt.Errorf("server identity is required")
+	}
+
+	conf := opaque.DefaultConfiguration()
+	oprfSeed := conf.GenerateOPRFSeed()
+
+	privateKey, publicKey := conf.KeyGen()
+	if privateKey == nil || publicKey == nil {
+		return nil, fmt.Errorf("generate OPAQUE server key pair")
+	}
+
+	skm := &opaque.ServerKeyMaterial{
+		Identity:       []byte(serverIdentity),
+		PrivateKey:     privateKey,
+		PublicKeyBytes: publicKey.Encode(),
+		OPRFGlobalSeed: oprfSeed,
+	}
+
+	encoded := skm.Encode()
+	return encoded, nil
 }

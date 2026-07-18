@@ -1,0 +1,9 @@
+version = 1
+
+[server]
+host = "127.0.0.1"
+port = 8080
+public_url = "http://127.0.0.1:8080"
+
+[security]
+access_token_ttl = 900000
