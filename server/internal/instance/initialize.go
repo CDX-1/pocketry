@@ -23,6 +23,8 @@ const (
 
 type Instance struct {
 	RootDir string
+	Marker  Marker
+	Config  config.Config
 }
 
 type Marker struct {
@@ -54,13 +56,13 @@ func Initialize(path string) (*Instance, error) {
 	}
 
 	if err := writeAccessTokenSecret(
-		filepath.Join(rootDir, "secrets", "access-token.key"),
+		filepath.Join(rootDir, accessTokenRelativePath),
 	); err != nil {
 		return nil, fmt.Errorf("create access token key: %w", err)
 	}
 
 	if err := writeOpaqueServerKeyMaterial(
-		filepath.Join(rootDir, "secrets", "opaque.key"),
+		filepath.Join(rootDir, opaqueRelativePath),
 	); err != nil {
 		return nil, fmt.Errorf("create OPAQUE server key material: %w", err)
 	}
@@ -147,7 +149,7 @@ func writeOpaqueServerKeyMaterial(path string) error {
 }
 
 func writeDefaultConfig(rootDir string) error {
-	path := filepath.Join(rootDir, "pocketry.toml")
+	path := filepath.Join(rootDir, configFilename)
 
 	err := os.WriteFile(
 		path,
@@ -162,7 +164,7 @@ func writeDefaultConfig(rootDir string) error {
 }
 
 func initializeDatabase(rootDir string) error {
-	databasePath := filepath.Join(rootDir, "data", "pocketry.db")
+	databasePath := filepath.Join(rootDir, databaseRelativePath)
 
 	store, err := db.Open(databasePath)
 	if err != nil {
@@ -190,7 +192,7 @@ func writeMarker(rootDir string) error {
 	}
 	data = append(data, '\n')
 
-	path := filepath.Join(rootDir, "pocketry.instance")
+	path := filepath.Join(rootDir, markerFilename)
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write instance marker: %w", err)
 	}
