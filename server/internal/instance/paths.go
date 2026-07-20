@@ -26,6 +26,6 @@ func (i *Instance) AccessTokenSecretPath() string {
 	return filepath.Join(i.RootDir, accessTokenRelativePath)
 }
 
-func (i *Instance) OpaqueServerKeyPath() string {
+func (i *Instance) OpaqueKeyMaterialPath() string {
 	return filepath.Join(i.RootDir, opaqueRelativePath)
 }

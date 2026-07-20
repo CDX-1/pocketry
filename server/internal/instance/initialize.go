@@ -79,9 +79,13 @@ func Initialize(path string) (*Instance, error) {
 		return nil, fmt.Errorf("write instance marker: %w", err)
 	}
 
-	cleanup = false
+	instance, err := Load(rootDir)
+	if err != nil {
+		return nil, fmt.Errorf("load initialized instance: %w", err)
+	}
 
-	return &Instance{RootDir: rootDir}, nil
+	cleanup = false
+	return instance, nil
 }
 
 func createTarget(path string) error {
