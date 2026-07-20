@@ -18,6 +18,11 @@ import (
 )
 
 func Run(ctx context.Context, output io.Writer, inst *instance.Instance) error {
+	accessTokenTTL, err := time.ParseDuration(inst.Config.Security.AccessTokenTTL)
+	if err != nil {
+		return fmt.Errorf("parse access token TTL: %w", err)
+	}
+
 	accessTokenSecret, err := inst.LoadAccessTokenSecret()
 	if err != nil {
 		return fmt.Errorf("load access token secret: %w", err)
@@ -46,13 +51,6 @@ func Run(ctx context.Context, output io.Writer, inst *instance.Instance) error {
 	}
 	defer store.Close()
 
-	accessTokenTTL, err := time.ParseDuration(
-		inst.Config.Security.AccessTokenTTL,
-	)
-	if err != nil {
-		return fmt.Errorf("parse access token TTL: %w", err)
-	}
-
 	mux := handlers.RegisterRoutes(
 		store.Q,
 		opaqueServer,
@@ -69,15 +67,29 @@ func Run(ctx context.Context, output io.Writer, inst *instance.Instance) error {
 		strconv.Itoa(inst.Config.Server.Port),
 	)
 
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", address, err)
+	}
+	defer listener.Close()
+
 	httpServer := &http.Server{
-		Addr:	 address,
 		Handler: cors.Handler(mux),
 	}
-	
+
+	return serve(ctx, output, httpServer, listener)
+}
+
+func serve(
+	ctx context.Context,
+	output io.Writer,
+	httpServer *http.Server,
+	listener net.Listener,
+) error {
 	serverErr := make(chan error, 1)
 
 	go func() {
-		err := httpServer.ListenAndServe()
+		err := httpServer.Serve(listener)
 
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErr <- err
@@ -87,7 +99,7 @@ func Run(ctx context.Context, output io.Writer, inst *instance.Instance) error {
 		serverErr <- nil
 	}()
 
-	fmt.Fprintf(output, "Pocketry server running at http://%s\n", address)
+	fmt.Fprintf(output, "Pocketry server is running at http://%s\n", listener.Addr())
 
 	select {
 	case err := <-serverErr:
@@ -96,11 +108,11 @@ func Run(ctx context.Context, output io.Writer, inst *instance.Instance) error {
 		}
 
 		return nil
-	
+
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(
 			context.Background(),
-			10 * time.Second,
+			10*time.Second,
 		)
 		defer cancel()
 
