@@ -17,12 +17,12 @@ import (
 
 const (
 	pendingAuthTTL = 10 * time.Minute
-	accessTokenTTL = 15 * time.Minute
 )
 
 type Handler struct {
-	queries *db.Queries
-	opaque  auth.OpaqueServer
+	queries 	   *db.Queries
+	opaque  	   auth.OpaqueServer
+	accessTokenTTL time.Duration
 }
 
 // request/response structs
@@ -78,8 +78,9 @@ type MeResponse struct {
 }
 
 func RegisterRoutes(
-	queries *db.Queries,
-	opaque auth.OpaqueServer,
+	queries 	   *db.Queries,
+	opaque  	   auth.OpaqueServer,
+	accessTokenTTL time.Duration,
 ) *http.ServeMux {
 	if queries == nil {
 		panic("handlers: database queries are nil")
@@ -90,8 +91,9 @@ func RegisterRoutes(
 	}
 
 	h := &Handler{
-		queries: queries,
-		opaque:  opaque,
+		queries: 		queries,
+		opaque:  		opaque,
+		accessTokenTTL: accessTokenTTL,
 	}
 
 	mux := http.NewServeMux()
@@ -394,7 +396,7 @@ func (h *Handler) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, err := auth.IssueAccessToken(pending.UserID, accessTokenTTL)
+	accessToken, err := auth.IssueAccessToken(pending.UserID, h.accessTokenTTL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to issue access token")
 		return
@@ -402,7 +404,7 @@ func (h *Handler) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, LoginFinishResponse{
 		AccessToken: accessToken,
-		ExpiresIn:   int64(accessTokenTTL.Seconds()),
+		ExpiresIn:   int64(h.accessTokenTTL.Seconds()),
 	})
 }
 

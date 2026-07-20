@@ -2,8 +2,12 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/CDX-1/pocketry/internal/instance"
+	"github.com/CDX-1/pocketry/internal/server"
 	"github.com/spf13/cobra"
 )
 
@@ -61,13 +65,19 @@ func newServerRunCommand() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			directory := args[0]
 
-			fmt.Fprintf(
-				cmd.OutOrStdout(),
-				"Running Pocketry server from %s\n",
-				directory,
-			)
+			inst, err := instance.Load(directory)
+			if err != nil {
+				return fmt.Errorf("load Pocketry server: %w", err)
+			}
 
-			return nil
+			ctx, stop := signal.NotifyContext(
+				cmd.Context(),
+				os.Interrupt,
+				syscall.SIGTERM,
+			)
+			defer stop()
+
+			return server.Run(ctx, cmd.OutOrStdout(), inst)
 		},
 	}
 }
