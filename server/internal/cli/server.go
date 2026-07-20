@@ -11,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newServerCommand() *cobra.Command {
+func newServerCommand(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "server",
 		Short: "Create and manage Pocketry servers",
@@ -19,7 +19,7 @@ func newServerCommand() *cobra.Command {
 
 	cmd.AddCommand(
 		newServerInitCommand(),
-		newServerRunCommand(),
+		newServerRunCommand(opts),
 	)
 
 	return cmd
@@ -56,14 +56,14 @@ func newServerInitCommand() *cobra.Command {
 	}
 }
 
-func newServerRunCommand() *cobra.Command {
+func newServerRunCommand(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
-		Use:   "run <directory>",
+		Use:   "run",
 		Short: "Run a Pocketry server",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.NoArgs,
 
 		RunE: func(cmd *cobra.Command, args []string) error {
-			directory := args[0]
+			directory := opts.path
 
 			inst, err := instance.Load(directory)
 			if err != nil {
