@@ -11,10 +11,13 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/CDX-1/pocketry/internal/auth"
 	"github.com/CDX-1/pocketry/internal/db"
 )
+
+const testAccessTokenTTL = 15 * time.Minute
 
 // fake opauqe server, avoids testing OPAQUE cryptography and tests purely router code
 
@@ -118,6 +121,7 @@ func setupTestServer(t *testing.T) http.Handler {
 	return RegisterRoutes(
 		store.Q,
 		&fakeOpaqueServer{},
+		testAccessTokenTTL,
 	)
 }
 
@@ -310,10 +314,10 @@ func performLogin(
 		t.Fatal("expected login finish response to include access_token")
 	}
 
-	if finishBody.ExpiresIn != int64(accessTokenTTL.Seconds()) {
+	if finishBody.ExpiresIn != int64(testAccessTokenTTL.Seconds()) {
 		t.Fatalf(
 			"expected expires_in %d, got %d",
-			int64(accessTokenTTL.Seconds()),
+			int64(testAccessTokenTTL.Seconds()),
 			finishBody.ExpiresIn,
 		)
 	}
