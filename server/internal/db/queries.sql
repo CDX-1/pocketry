@@ -157,3 +157,20 @@ SET
 	updated_at = CURRENT_TIMESTAMP
 WHERE user_id = ?
 AND revision = ?;
+
+-- ListUsers lists registered users within the specified limit
+-- name: ListUsers :many
+SELECT
+	id,
+	username,
+	crypto_policy_version,
+	created_at,
+	updated_at
+FROM users
+ORDER BY id ASC
+LIMIT ?;
+
+-- DeleteUser deletes a user and all associated data.
+-- name: DeleteUser :exec
+DELETE FROM users
+WHERE id = ?;

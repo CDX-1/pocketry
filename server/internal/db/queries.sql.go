@@ -222,6 +222,17 @@ func (q *Queries) DeletePendingRegistrationsByUsernameNormalized(ctx context.Con
 	return err
 }
 
+const deleteUser = `-- name: DeleteUser :exec
+DELETE FROM users
+WHERE id = ?
+`
+
+// DeleteUser deletes a user and all associated data.
+func (q *Queries) DeleteUser(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteUser, id)
+	return err
+}
+
 const getPendingLogin = `-- name: GetPendingLogin :one
 SELECT
 	id,
@@ -372,6 +383,56 @@ func (q *Queries) GetVaultByUserID(ctx context.Context, userID int64) (GetVaultB
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listUsers = `-- name: ListUsers :many
+SELECT
+	id,
+	username,
+	crypto_policy_version,
+	created_at,
+	updated_at
+FROM users
+ORDER BY id ASC
+LIMIT ?
+`
+
+type ListUsersRow struct {
+	ID                  int64
+	Username            string
+	CryptoPolicyVersion int64
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+}
+
+// ListUsers lists registered users within the specified limit
+func (q *Queries) ListUsers(ctx context.Context, limit int64) ([]ListUsersRow, error) {
+	rows, err := q.db.QueryContext(ctx, listUsers, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsersRow
+	for rows.Next() {
+		var i ListUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.CryptoPolicyVersion,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateVaultIfRevisionMatches = `-- name: UpdateVaultIfRevisionMatches :execrows
