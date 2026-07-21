@@ -17,11 +17,12 @@ import (
 
 const (
 	pendingAuthTTL = 10 * time.Minute
-	accessTokenTTL = 15 * time.Minute
 )
 
 type Handler struct {
-	opaque auth.OpaqueServer
+	queries 	   *db.Queries
+	opaque  	   auth.OpaqueServer
+	accessTokenTTL time.Duration
 }
 
 // request/response structs
@@ -76,13 +77,23 @@ type MeResponse struct {
 	Username string `json:"username"`
 }
 
-func RegisterRoutes(opaque auth.OpaqueServer) *http.ServeMux {
+func RegisterRoutes(
+	queries 	   *db.Queries,
+	opaque  	   auth.OpaqueServer,
+	accessTokenTTL time.Duration,
+) *http.ServeMux {
+	if queries == nil {
+		panic("handlers: database queries are nil")
+	}
+
 	if opaque == nil {
 		panic("handlers: opaque server is nil")
 	}
 
 	h := &Handler{
-		opaque: opaque,
+		queries: 		queries,
+		opaque:  		opaque,
+		accessTokenTTL: accessTokenTTL,
 	}
 
 	mux := http.NewServeMux()
@@ -140,7 +151,7 @@ func (h *Handler) handleRegisterStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	exists, err := db.Q.UsernameExists(r.Context(), usernameNormalized)
+	exists, err := h.queries.UsernameExists(r.Context(), usernameNormalized)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check username")
 		return
@@ -172,14 +183,14 @@ func (h *Handler) handleRegisterStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := db.Q.DeleteExpiredPendingRegistrations(
+	if err := h.queries.DeleteExpiredPendingRegistrations(
 		r.Context(),
 		time.Now().UTC(),
 	); err != nil {
 		log.Printf("delete expired pending registrations: %v", err)
 	}
 
-	err = db.Q.CreatePendingRegistration(r.Context(), db.CreatePendingRegistrationParams{
+	err = h.queries.CreatePendingRegistration(r.Context(), db.CreatePendingRegistrationParams{
 		ID:                 registrationID,
 		Username:           username,
 		UsernameNormalized: usernameNormalized,
@@ -222,7 +233,7 @@ func (h *Handler) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pending, err := db.Q.ConsumePendingRegistration(
+	pending, err := h.queries.ConsumePendingRegistration(
 		r.Context(),
 		req.RegistrationID,
 	)
@@ -246,7 +257,7 @@ func (h *Handler) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = db.Q.CreateUser(r.Context(), db.CreateUserParams{
+	err = h.queries.CreateUser(r.Context(), db.CreateUserParams{
 		Username:                 pending.Username,
 		UsernameNormalized:       pending.UsernameNormalized,
 		OpaqueRegistrationRecord: registrationRecord,
@@ -256,7 +267,7 @@ func (h *Handler) handleRegisterFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := db.Q.GetUserByUsernameNormalized(r.Context(), pending.UsernameNormalized)
+	user, err := h.queries.GetUserByUsernameNormalized(r.Context(), pending.UsernameNormalized)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load user")
 		return
@@ -292,7 +303,7 @@ func (h *Handler) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 
 	usernameNormalized := auth.NormalizeUsername(username)
 
-	user, err := db.Q.GetUserByUsernameNormalized(r.Context(), usernameNormalized)
+	user, err := h.queries.GetUserByUsernameNormalized(r.Context(), usernameNormalized)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
@@ -316,14 +327,14 @@ func (h *Handler) handleLoginStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := db.Q.DeleteExpiredPendingLogins(
+	if err := h.queries.DeleteExpiredPendingLogins(
 		r.Context(),
 		time.Now().UTC(),
 	); err != nil {
 		log.Printf("delete expired pending logins: %v", err)
 	}
 
-	err = db.Q.CreatePendingLogin(r.Context(), db.CreatePendingLoginParams{
+	err = h.queries.CreatePendingLogin(r.Context(), db.CreatePendingLoginParams{
 		ID:          loginID,
 		UserID:      user.ID,
 		ServerState: serverState,
@@ -365,7 +376,7 @@ func (h *Handler) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	pending, err := db.Q.ConsumePendingLogin(r.Context(), req.LoginID)
+	pending, err := h.queries.ConsumePendingLogin(r.Context(), req.LoginID)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
@@ -385,7 +396,7 @@ func (h *Handler) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	accessToken, err := auth.IssueAccessToken(pending.UserID, accessTokenTTL)
+	accessToken, err := auth.IssueAccessToken(pending.UserID, h.accessTokenTTL)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to issue access token")
 		return
@@ -393,7 +404,7 @@ func (h *Handler) handleLoginFinish(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, LoginFinishResponse{
 		AccessToken: accessToken,
-		ExpiresIn:   int64(accessTokenTTL.Seconds()),
+		ExpiresIn:   int64(h.accessTokenTTL.Seconds()),
 	})
 }
 
@@ -405,7 +416,7 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := db.Q.GetUserByID(r.Context(), userID)
+	user, err := h.queries.GetUserByID(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "user not found")
 		return
@@ -444,7 +455,7 @@ func (h *Handler) handleSaveVault(w http.ResponseWriter, r *http.Request) {
 
 	// Create a new vault if expected revision is 0
 	if req.ExpectedRevision == 0 {
-		err = db.Q.CreateVault(r.Context(), db.CreateVaultParams{
+		err = h.queries.CreateVault(r.Context(), db.CreateVaultParams{
 			UserID:        userID,
 			EncryptedBlob: encryptedBlobJSON,
 		})
@@ -460,7 +471,7 @@ func (h *Handler) handleSaveVault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rowsAffected, err := db.Q.UpdateVaultIfRevisionMatches(r.Context(), db.UpdateVaultIfRevisionMatchesParams{
+	rowsAffected, err := h.queries.UpdateVaultIfRevisionMatches(r.Context(), db.UpdateVaultIfRevisionMatchesParams{
 		EncryptedBlob: encryptedBlobJSON,
 		UserID:        userID,
 		Revision:      req.ExpectedRevision,
@@ -488,7 +499,7 @@ func (h *Handler) handleGetVault(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vaultRecord, err := db.Q.GetVaultByUserID(r.Context(), userID)
+	vaultRecord, err := h.queries.GetVaultByUserID(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "vault not found")
 		return

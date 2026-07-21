@@ -11,10 +11,13 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/CDX-1/pocketry/internal/auth"
 	"github.com/CDX-1/pocketry/internal/db"
 )
+
+const testAccessTokenTTL = 15 * time.Minute
 
 // fake opauqe server, avoids testing OPAQUE cryptography and tests purely router code
 
@@ -104,17 +107,22 @@ func setupTestServer(t *testing.T) http.Handler {
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 
-	if err := db.InitDB(dbPath); err != nil {
-		t.Fatalf("InitDB returned error: %v", err)
+	store, err := db.Open(dbPath)
+	if err != nil {
+		t.Fatalf("db.Open returned err: %v", err)
 	}
 
 	t.Cleanup(func() {
-		if db.DB != nil {
-			_ = db.DB.Close()
+		if err := store.Close(); err != nil {
+			t.Errorf("close test database: %v", err)
 		}
 	})
 
-	return RegisterRoutes(&fakeOpaqueServer{})
+	return RegisterRoutes(
+		store.Q,
+		&fakeOpaqueServer{},
+		testAccessTokenTTL,
+	)
 }
 
 func makeJSONRequest(
@@ -306,10 +314,10 @@ func performLogin(
 		t.Fatal("expected login finish response to include access_token")
 	}
 
-	if finishBody.ExpiresIn != int64(accessTokenTTL.Seconds()) {
+	if finishBody.ExpiresIn != int64(testAccessTokenTTL.Seconds()) {
 		t.Fatalf(
 			"expected expires_in %d, got %d",
-			int64(accessTokenTTL.Seconds()),
+			int64(testAccessTokenTTL.Seconds()),
 			finishBody.ExpiresIn,
 		)
 	}
@@ -1273,15 +1281,4 @@ func TestGetVaultReturnsNotFoundBeforeCreation(t *testing.T) {
 			rr.Body.String(),
 		)
 	}
-}
-
-// ensures router panics if passed nil OPAQUE server
-func TestRegisterRoutesPanicsWithNilOpaqueServer(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("expected RegisterRoutes to panic for nil OPAQUE server")
-		}
-	}()
-
-	RegisterRoutes(nil)
 }

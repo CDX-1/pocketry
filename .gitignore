@@ -6,3 +6,7 @@
 
 # Env vars
 .env
+
+# Test server
+
+test.pocketry/

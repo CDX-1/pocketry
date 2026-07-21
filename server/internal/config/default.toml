@@ -1,0 +1,12 @@
+version = 1
+
+[server]
+host = "127.0.0.1"
+port = 8080
+
+[security]
+access_token_ttl = "15m"
+
+[cors]
+allowed_origins = []
+allow_firefox_extensions = true
