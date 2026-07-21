@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/CDX-1/pocketry/internal/admin"
 	"github.com/CDX-1/pocketry/internal/db"
 	"github.com/CDX-1/pocketry/internal/instance"
 	"github.com/CDX-1/pocketry/internal/server"
@@ -25,6 +26,7 @@ func newServerCommand(opts *rootOptions) *cobra.Command {
 		newServerInitCommand(),
 		newServerRunCommand(opts),
 		newServerInfoCommand(opts),
+		newServerDoctorCommand(opts),
 	)
 
 	return cmd
@@ -124,6 +126,47 @@ func newServerInfoCommand(opts *rootOptions) *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout(), "Config version:", inst.Config.Version)
 			fmt.Fprintln(cmd.OutOrStdout(), "Instance format version:", inst.Marker.FormatVersion)
 			fmt.Fprintln(cmd.OutOrStdout(), "Users:", userCount)
+
+			return nil
+		},
+	}
+}
+
+func newServerDoctorCommand(opts *rootOptions) *cobra.Command {
+	return &cobra.Command{
+		Use:   "doctor",
+		Short: "Check the health of the Pocketry server instance",
+		Args:  cobra.NoArgs,
+
+		RunE: func(cmd *cobra.Command, args []string) error {
+			inst, err := instance.Load(opts.path)
+			if err != nil {
+				return fmt.Errorf("load Pocketry server: %w", err)
+			}
+
+			fmt.Fprintln(cmd.OutOrStdout(), "Pocketry server diagnostics")
+			fmt.Fprintln(cmd.OutOrStdout())
+
+			results := admin.Doctor(cmd.Context(), inst)
+			healthy := true
+
+			for _, result := range results {
+				if result.Err != nil {
+					healthy = false
+					fmt.Fprintf(cmd.OutOrStdout(), "✗ %s: %v\n", result.Name, result.Err)
+					continue
+				}
+
+				fmt.Fprintf(cmd.OutOrStdout(), "✓ %s\n", result.Name)
+			}
+
+			fmt.Fprintln(cmd.OutOrStdout())
+
+			if !healthy {
+				return fmt.Errorf("Pocketry server diagnostics failed")
+			}
+
+			fmt.Fprintln(cmd.OutOrStdout(), "Pocketry server is healthy.")
 
 			return nil
 		},
