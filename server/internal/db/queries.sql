@@ -174,3 +174,8 @@ LIMIT ?;
 -- name: DeleteUser :exec
 DELETE FROM users
 WHERE id = ?;
+
+-- GetUserCount gets the total number of registered users.
+-- name: GetUserCount :one
+SELECT COUNT(*)
+FROM users;

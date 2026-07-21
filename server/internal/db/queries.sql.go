@@ -354,6 +354,19 @@ func (q *Queries) GetUserByUsernameNormalized(ctx context.Context, usernameNorma
 	return i, err
 }
 
+const getUserCount = `-- name: GetUserCount :one
+SELECT COUNT(*)
+FROM users
+`
+
+// GetUserCount gets the total number of registered users.
+func (q *Queries) GetUserCount(ctx context.Context) (int64, error) {
+	row := q.db.QueryRowContext(ctx, getUserCount)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getVaultByUserID = `-- name: GetVaultByUserID :one
 SELECT
 	encrypted_blob,
