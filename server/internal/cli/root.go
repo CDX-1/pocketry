@@ -28,7 +28,7 @@ func newRootCommand() *cobra.Command {
 
 	cmd.AddCommand(
 		newServerCommand(opts),
-		newUserCommand(opts),
+		newUsersCommand(opts),
 	)
 
 	return cmd

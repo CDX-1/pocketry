@@ -12,22 +12,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newUserCommand(opts *rootOptions) *cobra.Command {
+func newUsersCommand(opts *rootOptions) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "user",
+		Use:   "users",
 		Short: "Fetch and manage registered users",
 	}
 
 	cmd.AddCommand(
-		newUserListCommand(opts),
-		newUserGetCommand(opts),
-		newUserDeleteCommand(opts),
+		newUsersListCommand(opts),
+		newUsersGetCommand(opts),
+		newUsersDeleteCommand(opts),
 	)
 
 	return cmd
 }
 
-func newUserListCommand(opts *rootOptions) *cobra.Command {
+func newUsersListCommand(opts *rootOptions) *cobra.Command {
 	var limit int64
 
 	cmd := &cobra.Command{
@@ -87,7 +87,7 @@ func newUserListCommand(opts *rootOptions) *cobra.Command {
 	return cmd
 }
 
-func newUserGetCommand(opts *rootOptions) *cobra.Command {
+func newUsersGetCommand(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "get <user_id>",
 		Short: "Get user details by user id",
@@ -132,7 +132,7 @@ func newUserGetCommand(opts *rootOptions) *cobra.Command {
 	}
 }
 
-func newUserDeleteCommand(opts *rootOptions) *cobra.Command {
+func newUsersDeleteCommand(opts *rootOptions) *cobra.Command {
 	return &cobra.Command{
 		Use:   "delete <user_id>",
 		Short: "Delete a user",
