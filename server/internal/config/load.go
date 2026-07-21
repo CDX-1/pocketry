@@ -71,6 +71,10 @@ func (c Config) Validate() error {
 		}
 	}
 
+	if err := validateRateLimitConfig(c.RateLimit); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -98,6 +102,60 @@ func validateOrigin(origin string) error {
 
 	if parsed.RawQuery != "" || parsed.Fragment != "" {
 		return fmt.Errorf("CORS origin must not contain a query or fragment: %q", origin)
+	}
+
+	return nil
+}
+
+func validateRateLimitConfig(cfg RateLimitConfig) error {
+	if !cfg.Enabled {
+		return nil
+	}
+
+	if cfg.EntryTTLSeconds <= 0 {
+		return errors.New("rate_limit.entry_ttl_seconds must be greater than zero")
+	}
+
+	if cfg.CleanupIntervalSeconds <= 0 {
+		return errors.New("rate_limit.cleanup_interval_seconds must be greater than zero")
+	}
+
+	if cfg.CleanupIntervalSeconds > cfg.EntryTTLSeconds {
+		return errors.New("rate_limit.cleanup_interval_secodns must not exceed entry_ttl_seconds")
+	}
+
+	policies := map[string]RateLimitPolicyConfig{
+		"global":			 	 cfg.Global,
+		"registration_start":	 cfg.RegistrationStart,
+		"registration_finish":	 cfg.RegistrationFinish,
+		"login_start":			 cfg.LoginStart,
+		"login_finish":			 cfg.LoginFinish,
+		"login_username":		 cfg.LoginUsername,
+		"registration_username": cfg.RegistrationUsername,
+		"vault_read":			 cfg.VaultRead,
+		"vault_write":			 cfg.VaultWrite,
+	}
+
+	for name, policy := range policies {
+		if err := validateRateLimitPolicy(name, policy); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func validateRateLimitPolicy(name string, policy RateLimitPolicyConfig) error {
+	if policy.Requests <= 0 {
+		return fmt.Errorf("rate_limit.%s.requests must be greater than zero", name)
+	}
+
+	if policy.WindowSeconds <= 0 {
+		return fmt.Errorf("rate_limit.%s.window_seconds must be greater than zero", name)
+	}
+
+	if policy.Burst <= 0 {
+		return fmt.Errorf("rate_limit.%s.burst must be greater than zero", name)
 	}
 
 	return nil

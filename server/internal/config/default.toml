@@ -10,3 +10,53 @@ access_token_ttl = "15m"
 [cors]
 allowed_origins = []
 allow_firefox_extensions = true
+
+[rate_limit]
+enabled = true
+entry_ttl_seconds = 900
+cleanup_interval_seconds = 60
+
+[rate_limit.global]
+requests = 120
+window_seconds = 60
+burst = 30
+
+[rate_limit.registration_start]
+requests = 5
+window_seconds = 60
+burst = 3
+
+[rate_limit.registration_finish]
+requests = 10
+window_seconds = 60
+burst = 5
+
+[rate_limit.login_start]
+requests = 10
+window_seconds = 60
+burst = 5
+
+[rate_limit.login_finish]
+requests = 15
+window_seconds = 60
+burst = 5
+
+[rate_limit.login_username]
+requests = 5
+window_seconds = 60
+burst = 3
+
+[rate_limit.registration_username]
+requests = 5
+window_seconds = 60
+burst = 3
+
+[rate_limit.vault_read]
+requests = 120
+window_seconds = 60
+burst = 30
+
+[rate_limit.vault_write]
+requests = 30
+window_seconds = 60
+burst = 10
