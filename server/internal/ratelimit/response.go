@@ -16,6 +16,7 @@ func WriteExceeded(w http.ResponseWriter, policy Policy) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+	w.WriteHeader(http.StatusTooManyRequests)
 
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error": "too many requests",
